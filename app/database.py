@@ -92,6 +92,20 @@ def init_db() -> None:
         _migrate_overrides(conn)
         _migrate_audit(conn)
         _migrate_change_requests(conn)
+        
+        # Ensure at least one admin exists
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count == 0:
+            # Seed the 5 original users if DB was created completely empty (like on Render)
+            default_users = [
+                ("u1", "Mohammad Hamzeh", "mohammad.hamzeh", "mohammad.hamzeh@cubesplatform.com", "admin", "all", "[]", 1),
+                ("u2", "Anas Abdelhadi", "anas.abdelhadi", "anas.abdelhadi@cubesplatform.com", "editor", "cubes", "[]", 1),
+                ("u3", "Rawad Khallad", "rawad.khallad", "rawad.khallad@cubesplatform.com", "editor", "cubes", "[]", 1),
+                ("u4", "Mohammad Younes", "mohammad.younes", "mohammad.younes@cubesplatform.com", "viewer", "all", "[]", 1),
+                ("u5", "Dima Hamodi", "dima.hamodi", "dima.hamodi@tsmesolutions.com", "viewer", "implementation", "[]", 1)
+            ]
+            for du in default_users:
+                conn.execute("INSERT INTO users VALUES (?,?,?,?,?,?,?,?)", du)
 
 
 def _migrate_users(conn: sqlite3.Connection) -> None:
