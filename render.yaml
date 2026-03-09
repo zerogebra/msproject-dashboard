@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: msproject-dashboard
+    env: docker
+    region: oregon
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 8000

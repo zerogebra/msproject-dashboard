@@ -1,0 +1,1699 @@
+<!doctype html>
+<html lang="en" class="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PRISM – PMO Dashboard</title>
+
+<!-- React 18 + Babel CDN (no Node.js / build step required) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+/* ── DARK ──────────────────────────────────────────────────── */
+:root{
+  --bg:#060912;--s1:#0c1122;--s2:#111827;--s3:#19243a;--s4:#1f2d45;
+  --border:#1b2d4a;--border2:#2a3f5f;
+  --text:#e2e8ff;--muted:#64748b;--dim:#2e4060;
+  --brand:#818cf8;--brand2:#a5b4fc;
+  --g:#34d399;--a:#fbbf24;--r:#fb7185;
+  --g-bg:rgba(52,211,153,.12);--g-bd:rgba(52,211,153,.3);
+  --a-bg:rgba(251,191,36,.12);--a-bd:rgba(251,191,36,.3);
+  --r-bg:rgba(251,113,133,.12);--r-bd:rgba(251,113,133,.3);
+  --rr:12px;
+}
+/* ── LIGHT (default) ───────────────────────────────────────── */
+html.light{
+  --bg:#f0f4f8;--s1:#ffffff;--s2:#f8fafc;--s3:#edf1f7;--s4:#dde5ef;
+  --border:#d1dae6;--border2:#b8c5d6;
+  --text:#1a2332;--muted:#5a7090;--dim:#8fa4be;
+  --brand:#5b67e8;--brand2:#4048c4;
+  --g:#16a367;--a:#c47c08;--r:#d42f48;
+  --g-bg:rgba(22,163,103,.10);--g-bd:rgba(22,163,103,.3);
+  --a-bg:rgba(196,124,8,.10);--a-bd:rgba(196,124,8,.28);
+  --r-bg:rgba(212,47,72,.10);--r-bd:rgba(212,47,72,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:13px/1.6 'Segoe UI',system-ui,sans-serif;transition:background .2s,color .2s}
+.shell{display:grid;grid-template-columns:272px 1fr;height:100vh}
+
+/* SIDEBAR */
+.sidebar{background:var(--s1);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.sb-logo{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.prism-icon{width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;flex-shrink:0}
+.sb-brand{font-weight:800;font-size:14px;background:linear-gradient(90deg,var(--brand),var(--brand2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sb-sub{font-size:10px;color:var(--muted)}
+.sb-block{padding:10px 14px;border-bottom:1px solid var(--border)}
+.sb-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+.sb-hint{font-size:10px;color:var(--dim);padding:2px 14px 6px;font-style:italic}
+.sb-search{width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px;outline:none}
+.sb-search:focus{border-color:var(--brand)}
+.sb-search::placeholder{color:var(--dim)}
+select.sb-sel{width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 8px;font-size:11px;cursor:pointer;outline:none}
+.proj-list{flex:1;overflow-y:auto;padding:6px}
+.proj-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;border:1px solid transparent;cursor:pointer;transition:.15s;margin-bottom:3px;user-select:none}
+.proj-row:hover{background:var(--s3);border-color:var(--border)}
+.proj-row.sel{background:rgba(91,103,232,.1);border-color:rgba(91,103,232,.4)}
+html:not(.light) .proj-row.sel{background:rgba(129,140,248,.1);border-color:rgba(129,140,248,.4)}
+.pcheck{width:16px;height:16px;border-radius:4px;border:2px solid var(--border2);flex-shrink:0;display:grid;place-items:center}
+.proj-row.sel .pcheck{background:var(--brand);border-color:var(--brand)}
+.proj-row.sel .pcheck::after{content:'✓';color:#fff;font-size:10px;font-weight:700}
+.pdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.pname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmeta{font-size:10px;color:var(--muted)}
+.rag{padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0}
+.rag-G{background:var(--g-bg);color:var(--g);border:1px solid var(--g-bd)}
+.rag-A{background:var(--a-bg);color:var(--a);border:1px solid var(--a-bd)}
+.rag-R{background:var(--r-bg);color:var(--r);border:1px solid var(--r-bd)}
+.sb-foot{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px}
+.btn{padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--s3);color:var(--text);transition:.15s;flex:1;text-align:center}
+.btn:hover{border-color:var(--brand);color:var(--brand)}
+.btn.white{background:#fff;color:#111;border-color:#cbd5e1}
+.mode-btn{width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);cursor:pointer;display:grid;place-items:center;font-size:16px;flex-shrink:0}
+
+/* MAIN */
+.main{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.topbar{display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0}
+.tb-title{font-weight:700;font-size:14px}
+.tb-sub{font-size:11px;color:var(--muted)}
+.grow{flex:1}
+select.ctrl{background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:11px;cursor:pointer;outline:none}
+.content{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:14px 18px;display:flex;flex-direction:column;gap:14px}
+
+/* KPI */
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.kpi{background:var(--s1);border:1px solid var(--border);border-radius:var(--rr);padding:12px 14px;display:flex;flex-direction:column;gap:3px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.kpi.kb::before{background:linear-gradient(90deg,var(--brand),var(--brand2))}
+.kpi.kg::before{background:linear-gradient(90deg,var(--g),#6ee7b7)}
+.kpi.ka::before{background:linear-gradient(90deg,var(--a),#fde68a)}
+.kpi.kr::before{background:linear-gradient(90deg,var(--r),#fca5a5)}
+.kpi.kx::before{background:linear-gradient(90deg,var(--muted),var(--border2))}
+.kl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.kv{font-size:28px;font-weight:800;line-height:1.1}
+.ks{font-size:10px;color:var(--dim)}
+
+/* PROJECT CARD */
+.proj-section{background:var(--s1);border:1px solid var(--border);border-radius:var(--rr)}
+.ps-hdr{display:flex;align-items:center;gap:12px;padding:13px 16px;background:var(--s2);border-bottom:1px solid var(--border);border-radius:var(--rr) var(--rr) 0 0;flex-wrap:wrap;row-gap:8px}
+.ps-av{width:46px;height:46px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:14px;flex-shrink:0}
+.ps-nm{font-size:14px;font-weight:700}
+.ps-dt{font-size:11px;color:var(--muted)}
+.ps-mx{display:flex;align-items:center;gap:14px;flex-shrink:0;margin-left:auto;flex-wrap:wrap}
+.ps-mv{font-size:22px;font-weight:800;line-height:1}
+.ps-ml{font-size:10px;color:var(--muted);text-transform:uppercase}
+.ps-bar{height:4px;background:var(--s3)}
+.ps-bfill{height:100%;transition:width .5s}
+.push-area{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.pending-badge{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(234,179,8,.15);color:#92610a;border:1px solid rgba(234,179,8,.35)}
+html:not(.light) .pending-badge{color:#fde68a}
+.push-btn{padding:6px 14px;border-radius:8px;border:none;cursor:pointer;font-size:11px;font-weight:700;background:var(--brand);color:#fff;white-space:nowrap}
+.push-btn:disabled{opacity:.35;cursor:default}
+
+/* SUMMARY STRIP */
+.sumstrip{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border)}
+.sumc{padding:10px 16px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:4px}
+.sumc:last-child{border-right:none}
+.suml{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:2px}
+.sumv{font-size:13px;font-weight:700}
+/* Health reasoning */
+.health-reason{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5}
+
+/* AI INSIGHTS */
+.insights-section{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--s2)}
+.insights-hd{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.insights-hd::after{content:'';flex:1;height:1px;background:var(--border)}
+.insights-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.insight-card{background:var(--s1);border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.ic-hdr{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.ic-body{display:flex;flex-direction:column;gap:0}
+.ic-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);font-size:11px}
+.ic-row:last-child{border-bottom:none}
+.ic-row:hover{background:var(--s3)}
+.ic-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ic-tag{padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;white-space:nowrap;flex-shrink:0}
+.ic-days{font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0;text-align:right}
+.ic-empty{padding:12px;font-size:11px;color:var(--dim);text-align:center}
+
+/* TASK TABLE */
+.tt-section{border-bottom:1px solid var(--border)}
+.tt-hdr{display:flex;align-items:center;gap:10px;padding:10px 16px 9px;border-bottom:1px solid var(--border);background:var(--s2)}
+.tt-hdr h3{font-size:12px;font-weight:700}
+.tt-meta{font-size:11px;color:var(--muted)}
+table.msp{width:100%;border-collapse:collapse;font-size:12px}
+table.msp th{padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;background:var(--s2)}
+table.msp td{padding:0;border-bottom:1px solid var(--border);vertical-align:middle}
+.td-pad{padding:0 10px;display:flex;align-items:center;height:100%}
+.tr-root td{background:rgba(91,103,232,.09)!important;border-top:2px solid rgba(91,103,232,.3)!important;border-bottom:2px solid rgba(91,103,232,.2)!important}
+.tr-root:hover td{background:rgba(91,103,232,.14)!important}
+html:not(.light) .tr-root td{background:rgba(129,140,248,.1)!important;border-top:2px solid rgba(129,140,248,.35)!important;border-bottom:2px solid rgba(129,140,248,.2)!important}
+html:not(.light) .tr-root:hover td{background:rgba(129,140,248,.16)!important}
+.tr-phase td{background:rgba(0,0,0,.03)!important;border-left:3px solid rgba(0,0,0,.08)!important}
+.tr-phase:hover td{background:rgba(0,0,0,.06)!important}
+html:not(.light) .tr-phase td{background:rgba(255,255,255,.03)!important;border-left:3px solid rgba(255,255,255,.1)!important}
+html:not(.light) .tr-phase:hover td{background:rgba(255,255,255,.06)!important}
+.tr-task:hover td{background:var(--s3)!important}
+.tr-ms td{background:rgba(91,103,232,.03)!important}
+.tr-ms:hover td{background:rgba(91,103,232,.07)!important}
+table.msp tr td{height:34px}
+table.msp tr.tr-root td{height:42px}
+table.msp tr.tr-phase td{height:36px}
+.name-cell{display:flex;align-items:center;min-width:0;gap:0;padding:0 10px}
+.tree-conn{font-size:10px;color:var(--dim);white-space:pre;flex-shrink:0;font-family:monospace}
+.row-icon{flex-shrink:0;margin-right:5px;font-size:12px;width:14px;text-align:center}
+.row-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr-root .row-name{font-weight:700;font-size:13px;color:var(--brand)}
+.tr-phase .row-name{font-weight:700;color:var(--text)}
+.tr-task .row-name{color:var(--text)}
+.tr-ms .row-name{color:var(--brand);font-style:italic}
+.type-badge{padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;display:inline-block;min-width:62px;text-align:center}
+.t-sum{background:rgba(91,103,232,.1);color:var(--brand);border:1px solid rgba(91,103,232,.22)}
+.t-task{background:rgba(100,116,139,.1);color:var(--muted);border:1px solid rgba(100,116,139,.2)}
+.t-ms{background:rgba(91,103,232,.08);color:var(--brand2);border:1px solid rgba(91,103,232,.18)}
+.pbar-wrap{display:flex;align-items:center;gap:6px}
+.pbar{width:52px;height:5px;background:var(--s3);border-radius:999px;overflow:hidden;border:1px solid var(--border);flex-shrink:0}
+.pfill{height:100%;border-radius:999px}
+.sc{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;display:inline-block;min-width:76px;text-align:center}
+.sc-done{background:var(--g-bg);color:var(--g);border:1px solid var(--g-bd)}
+.sc-on{background:rgba(91,103,232,.12);color:var(--brand);border:1px solid rgba(91,103,232,.25)}
+.sc-risk{background:var(--a-bg);color:var(--a);border:1px solid var(--a-bd)}
+.sc-late{background:rgba(249,115,22,.12);color:#c2410c;border:1px solid rgba(249,115,22,.35)}
+html:not(.light) .sc-late{color:#fb923c}
+.sc-critical{background:var(--r-bg);color:var(--r);border:1px solid var(--r-bd)}
+.sc-ns{background:rgba(100,116,139,.1);color:var(--muted);border:1px solid rgba(100,116,139,.25)}
+.sc-ms-ok{background:var(--g-bg);color:var(--g);border:1px solid var(--g-bd)}
+.sc-ms-miss{background:var(--r-bg);color:var(--r);border:1px solid var(--r-bd)}
+.sc-ms-up{background:rgba(91,103,232,.08);color:var(--brand2);border:1px solid rgba(91,103,232,.18)}
+
+/* INLINE EDITOR */
+.override-badge{display:inline-flex;align-items:center;padding:1px 5px;border-radius:4px;font-size:9px;font-weight:700;background:rgba(234,179,8,.15);color:#92610a;border:1px solid rgba(234,179,8,.35);margin-left:5px}
+html:not(.light) .override-badge{color:#fde68a}
+.pct-edit-cell{cursor:pointer;transition:.15s}
+.pct-edit-cell:hover{background:rgba(91,103,232,.12)!important;border-radius:4px}
+/* fixed layout so every row's number + edit icon lands in the same columns */
+/* % cell: value LEFT-aligned, edit icon RIGHT-aligned, both always in same column */
+.pct-cell-inner{display:flex;align-items:center;justify-content:space-between;width:100%;padding:0 10px}
+.pct-num{font-size:11px;font-weight:700;text-align:left;flex-shrink:0;min-width:32px}
+.pct-edit-icon{font-size:10px;opacity:.3;width:14px;flex-shrink:0;text-align:center;flex:0}
+.pct-edit-cell:hover .pct-edit-icon{opacity:1;color:var(--brand)}
+.pct-editor{display:flex;align-items:center;gap:3px;padding:2px 6px}
+.pct-editor input{width:44px;padding:2px 5px;border:1.5px solid var(--brand);border-radius:5px;font-size:12px;font-weight:700;color:var(--text);background:var(--s1);outline:none;text-align:center}
+.pe-ok{padding:2px 8px;border-radius:5px;border:none;cursor:pointer;font-size:11px;font-weight:700;background:var(--brand);color:#fff}
+.pe-cancel{padding:2px 8px;border-radius:5px;border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:700;background:var(--s3);color:var(--muted)}
+.pe-reset{padding:2px 6px;border-radius:5px;border:1px solid var(--border);cursor:pointer;font-size:10px;background:transparent;color:var(--dim)}
+
+/* GANTT */
+.gantt-section{padding:14px 16px}
+.sec-hd{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec-hd::after{content:'';flex:1;height:1px;background:var(--border)}
+.g-row{display:flex;align-items:center;min-height:24px}
+.g-row.g-row-root{min-height:34px;border-top:2px solid rgba(91,103,232,.2);border-bottom:1px solid rgba(91,103,232,.1);background:rgba(91,103,232,.04);border-radius:4px;margin-bottom:2px}
+.g-row.g-row-phase{min-height:28px;background:rgba(0,0,0,.02)}
+html:not(.light) .g-row.g-row-root{background:rgba(129,140,248,.06);border-top-color:rgba(129,140,248,.3)}
+html:not(.light) .g-row.g-row-phase{background:rgba(255,255,255,.03)}
+.g-left{width:240px;flex-shrink:0;display:flex;align-items:center;padding-right:6px}
+.g-lbl{flex:1;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.g-lbl.l1{font-weight:800;font-size:12px;color:var(--brand)}
+.g-lbl.l2{font-weight:700;color:var(--text);padding-left:8px}
+.g-lbl.l3{color:var(--muted);padding-left:20px}
+.g-lbl.l4{color:var(--dim);padding-left:32px}
+.g-pct{font-size:10px;font-weight:700;min-width:34px;text-align:right;flex-shrink:0;color:var(--muted)}
+.g-track{flex:1;position:relative;height:18px;display:flex;align-items:center}
+.g-row-root .g-track{height:22px}
+.g-row-phase .g-track{height:18px}
+/* Full-span bar: shows total duration as a pill, with fill inside showing completion */
+.g-bar{
+  position:absolute;
+  height:100%;
+  border-radius:6px;
+  overflow:hidden;
+  min-width:4px;
+  /* Track / empty portion */
+  background:rgba(100,116,139,.15);
+  border:1px solid rgba(100,116,139,.2);
+}
+html.light .g-bar{background:rgba(100,116,139,.12);border-color:rgba(100,116,139,.18)}
+.g-bar-fill{
+  position:absolute;
+  left:0;top:0;bottom:0;
+  border-radius:5px;
+  transition:width .4s ease;
+  box-shadow:inset -2px 0 3px rgba(0,0,0,.18);
+  /* slightly lighter right tip for a "progress bar" feel */
+}
+.g-bar-fill::after{
+  content:'';
+  position:absolute;
+  right:0;top:0;bottom:0;
+  width:4px;
+  background:rgba(255,255,255,.25);
+  border-radius:0 4px 4px 0;
+}
+/* Summary bars — slightly thinner fill for visual hierarchy */
+.g-bar.g-bar-summary{height:70%;top:15%;border-radius:4px}
+.g-bar.g-bar-root{height:80%;top:10%;border-radius:6px}
+.g-ms{position:absolute;top:50%;transform:translate(-50%,-50%) rotate(45deg);width:12px;height:12px;border:2.5px solid rgba(255,255,255,.8)}
+.g-dhdr{display:flex;margin-bottom:6px}
+.g-dspacer{width:240px;flex-shrink:0}
+.g-dates{flex:1;position:relative;height:16px;overflow:hidden}
+.g-tick{position:absolute;font-size:9px;color:var(--dim);transform:translateX(-50%);border-left:1px dashed var(--border2);padding-left:3px;height:100%;display:flex;align-items:center}
+.g-tick-today{color:var(--r)!important;font-weight:800!important;border-left-color:rgba(210,40,55,.6)!important}
+
+/* AUDIT LOG */
+.audit-section{background:var(--s1);border:1px solid var(--border);border-radius:var(--rr)}
+.audit-hdr{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--s2);border-radius:var(--rr) var(--rr) 0 0;cursor:pointer;user-select:none}
+.audit-hdr:hover{background:var(--s3)}
+.audit-hdr h3{font-size:12px;font-weight:700;flex:1}
+table.atbl{width:100%;border-collapse:collapse;font-size:11px}
+table.atbl th{padding:6px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border2);background:var(--s2);white-space:nowrap}
+table.atbl td{padding:7px 10px;border-bottom:1px solid var(--border)}
+table.atbl tr:hover td{background:var(--s3)}
+.a-synced{color:var(--g);font-weight:700}
+.a-pending{color:var(--a);font-weight:700}
+
+/* TOAST */
+.toast{position:fixed;bottom:22px;right:22px;z-index:9999;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;color:#fff;box-shadow:0 4px 24px rgba(0,0,0,.2);transition:opacity .4s;pointer-events:none;max-width:400px}
+
+.empty{padding:40px;text-align:center;color:var(--dim);font-size:14px}
+.loading{padding:40px;text-align:center;color:var(--muted)}
+
+/* ── LOGIN SCREEN ── */
+.login-screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:10000}
+.login-card{background:var(--s1);border:1px solid var(--border);border-radius:16px;padding:40px 48px;width:460px;max-width:95vw;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,.15)}
+.login-logo{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.login-brand{font-size:20px;font-weight:800;letter-spacing:.04em}
+.login-sub{font-size:11px;color:var(--muted)}
+.login-card h2{font-size:22px;font-weight:800;margin:0}
+.login-card p{font-size:13px;color:var(--muted);margin:0}
+.login-err{background:rgba(185,28,28,.1);border:1px solid rgba(185,28,28,.3);color:#b91c1c;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600}
+html.light .login-err{color:#991b1b}
+.login-input{padding:10px 14px;border-radius:9px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:13px;outline:none;transition:.15s}
+.login-input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,103,232,.15)}
+.login-btn{padding:11px;border-radius:9px;background:var(--brand);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}
+.login-btn:hover{background:var(--brand2)}
+.login-btn:disabled{opacity:.5;cursor:default}
+.login-hint{font-size:11px;color:var(--dim);text-align:center}
+
+/* ── USER CHIP (topbar) ── */
+.user-chip{display:flex;align-items:center;gap:7px;padding:5px 10px 5px 5px;border-radius:999px;background:var(--s2);border:1px solid var(--border);cursor:default}
+.user-av{width:26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:800;flex-shrink:0}
+.user-nm{font-size:12px;font-weight:600}
+.user-role{font-size:10px;color:var(--muted)}
+.logout-btn{padding:4px 9px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:10px;cursor:pointer}
+.logout-btn:hover{border-color:var(--r);color:var(--r)}
+.admin-btn{padding:6px 12px;border-radius:8px;border:none;background:rgba(91,103,232,.12);color:var(--brand);font-size:11px;font-weight:700;cursor:pointer;border:1px solid rgba(91,103,232,.25)}
+.admin-btn:hover{background:rgba(91,103,232,.2)}
+
+/* ── ADMIN PANEL ── */
+.adm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow-y:auto}
+.adm-panel{background:var(--s1);border:1px solid var(--border);border-radius:16px;width:900px;max-width:100%;display:flex;flex-direction:column}
+.adm-hdr{display:flex;align-items:center;gap:10px;padding:18px 22px;border-bottom:1px solid var(--border);background:var(--s2);border-radius:16px 16px 0 0}
+.adm-hdr h2{font-size:15px;font-weight:800;flex:1}
+.adm-close{width:30px;height:30px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:15px;display:grid;place-items:center}
+.adm-close:hover{border-color:var(--r);color:var(--r)}
+.adm-body{padding:20px 22px;display:flex;flex-direction:column;gap:16px}
+.adm-section-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+table.utbl{width:100%;border-collapse:collapse;font-size:12px}
+table.utbl th{padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border2);background:var(--s2);white-space:nowrap}
+table.utbl td{padding:8px 10px;border-bottom:1px solid var(--border)}
+table.utbl tr:hover td{background:var(--s3)}
+.role-badge{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700}
+.rb-admin{background:rgba(91,103,232,.12);color:var(--brand);border:1px solid rgba(91,103,232,.3)}
+.rb-editor{background:rgba(22,163,74,.1);color:var(--g);border:1px solid var(--g-bd)}
+.rb-viewer{background:var(--s3);color:var(--muted);border:1px solid var(--border2)}
+.rb-inactive{background:rgba(185,28,28,.08);color:var(--r);border:1px solid rgba(185,28,28,.2)}
+.adm-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px;background:var(--s2);border:1px solid var(--border);border-radius:10px}
+.adm-form-title{grid-column:1/-1;font-size:12px;font-weight:700}
+.adm-field{display:flex;flex-direction:column;gap:4px}
+.adm-field label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase}
+.adm-field input,.adm-field select{padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--s1);color:var(--text);font-size:12px;outline:none}
+.adm-field input:focus,.adm-field select:focus{border-color:var(--brand)}
+.adm-form-actions{grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end}
+.adm-save-btn{padding:7px 16px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer}
+.adm-cancel-btn{padding:7px 14px;border-radius:8px;background:var(--s3);color:var(--text);border:1px solid var(--border);font-size:12px;cursor:pointer}
+.adm-act-btn{padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:10px;cursor:pointer}
+.adm-act-btn:hover{border-color:var(--brand);color:var(--brand)}
+.adm-act-btn.del:hover{border-color:var(--r);color:var(--r)}
+
+/* ── CHANGE REQUEST ── */
+.cr-req-btn{padding:3px 8px;border-radius:6px;border:1px solid rgba(234,179,8,.4);background:rgba(234,179,8,.08);color:#92610a;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap}
+html:not(.light) .cr-req-btn{color:#fde68a}
+.cr-req-btn:hover{background:rgba(234,179,8,.16)}
+.notif-badge{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:999px;background:var(--r);color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center;padding:0 3px}
+.cr-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px}
+.cr-modal{background:var(--s1);border:1px solid var(--border);border-radius:14px;width:460px;max-width:100%;padding:26px 28px;display:flex;flex-direction:column;gap:14px}
+.cr-modal h3{font-size:15px;font-weight:800;margin:0}
+.cr-modal p{font-size:12px;color:var(--muted);margin:0}
+.cr-field{display:flex;flex-direction:column;gap:5px}
+.cr-field label{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)}
+.cr-field input,.cr-field textarea{padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:12px;outline:none;font-family:inherit}
+.cr-field input:focus,.cr-field textarea:focus{border-color:var(--brand)}
+.cr-field textarea{resize:vertical;min-height:70px}
+.cr-modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.cr-submit-btn{padding:8px 18px;border-radius:8px;background:var(--brand);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer}
+.cr-cancel-btn{padding:8px 14px;border-radius:8px;background:var(--s3);color:var(--text);border:1px solid var(--border);font-size:12px;cursor:pointer}
+.cr-status-pending{color:var(--a);font-weight:700}
+.cr-status-approved{color:var(--g);font-weight:700}
+.cr-status-rejected{color:var(--r);font-weight:700}
+.adm-tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.adm-tab{padding:7px 14px;border-radius:7px 7px 0 0;font-size:12px;font-weight:600;cursor:pointer;border:1px solid transparent;border-bottom:none;color:var(--muted)}
+.adm-tab.active{background:var(--s1);border-color:var(--border);color:var(--text)}
+.adm-tab:hover:not(.active){color:var(--text)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ── CONSTANTS & UTILITIES ───────────────────────────────────────
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const COLORS = ['#5b67e8','#0ea5e9','#10b981','#f59e0b','#ec4899','#14b8a6'];
+const fmt  = d => new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+const fmtS = d => new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+const days = (a,b) => Math.round((new Date(b)-new Date(a))/864e5);
+const clamp = (v,a,b) => Math.min(b,Math.max(a,v));
+
+function rag(pct,end){
+  if(pct>=100) return 'G';
+  if(TODAY>new Date(end)&&pct<100) return 'R';
+  return pct>=50?'G':pct>=20?'A':'R';
+}
+const ragLabel = r => r==='G'?'On Track':r==='A'?'At Risk':'Delayed';
+
+function taskSt(t){
+  if(t.pct>=100) return{l:'Completed',c:'sc-done'};
+  const todayStr=TODAY.toISOString().split('T')[0];
+  const endDate=new Date(t.end);
+  const startDate=new Date(t.start);
+  if(TODAY>endDate){
+    const overdue=days(t.end,todayStr);
+    return overdue>14?{l:'Critical',c:'sc-critical'}:{l:'Delayed',c:'sc-late'};
+  }
+  if(TODAY<startDate) return{l:'Not Started',c:'sc-ns'};
+  // Task window has opened but nothing recorded yet → should-have-started warning
+  if(t.pct===0) return{l:'Not Started',c:'sc-risk'};
+  const tot=Math.max(1,days(t.start,t.end));
+  const elap=clamp(days(t.start,todayStr),0,tot);
+  const expectedPct=Math.round(elap/tot*100);
+  return t.pct<expectedPct-20?{l:'At Risk',c:'sc-risk'}:{l:'In Progress',c:'sc-on'};
+}
+
+// Returns a human-readable reason string for the status (used as tooltip).
+function taskStReason(t,st){
+  const todayStr=TODAY.toISOString().split('T')[0];
+  if(st.c==='sc-done')     return 'Task is 100% complete.';
+  if(st.c==='sc-ns'&&TODAY<new Date(t.start)) return `Scheduled to start ${fmt(t.start)}.`;
+  if(st.c==='sc-risk'&&t.pct===0&&TODAY>=new Date(t.start)&&TODAY<=new Date(t.end))
+    return `Should have started ${fmt(t.start)} — no progress recorded yet.`;
+  if(st.c==='sc-critical'){
+    const od=days(t.end,todayStr);
+    return `${od} day${od!==1?'s':''} past finish date (${fmt(t.end)}). Requires immediate attention.`;
+  }
+  if(st.c==='sc-late'){
+    const od=days(t.end,todayStr);
+    return `${od} day${od!==1?'s':''} past finish date (${fmt(t.end)}).`;
+  }
+  const tot=Math.max(1,days(t.start,t.end));
+  const elap=clamp(days(t.start,todayStr),0,tot);
+  const expectedPct=Math.round(elap/tot*100);
+  if(st.c==='sc-risk')
+    return `Behind schedule — ${elap}d elapsed of ${tot}d total. Expected ~${expectedPct}%, actual ${Math.round(t.pct)}%.`;
+  return `On track — ${elap}d elapsed of ${tot}d total (expected ~${expectedPct}%, actual ${Math.round(t.pct)}%).`;
+}
+
+function addWBS(items){
+  const ctr=[0,0,0,0,0];
+  return items.map(t=>{
+    const lv=t.level-1;
+    ctr[lv]++;
+    for(let i=lv+1;i<ctr.length;i++) ctr[i]=0;
+    return{...t,wbs:ctr.slice(0,t.level).join('.')};
+  });
+}
+
+// Recalculate summary task % from their leaf descendants so overrides propagate up.
+// Special case: the first item is the project root (MPXJ synthetic wrapper). It always
+// owns ALL leaf tasks regardless of the outline-level structure below it.
+function recalcSummaryPcts(items){
+  // Leaves = non-summary, non-milestone tasks (actual work items)
+  const allLeaves=items.filter(x=>!x.is_summary&&!x.is_milestone);
+  return items.map((t,idx)=>{
+    if(!t.is_summary) return t;
+    let leaves;
+    if(idx===0){
+      leaves=allLeaves;
+    } else {
+      leaves=[];
+      for(let j=idx+1;j<items.length;j++){
+        if(items[j].level<=t.level) break;
+        if(!items[j].is_summary&&!items[j].is_milestone) leaves.push(items[j]);
+      }
+    }
+    if(!leaves.length) return t;
+    const avg=Math.round(leaves.reduce((s,d)=>s+d.pct,0)/leaves.length);
+    return{...t,pct:avg};
+  });
+}
+
+// Unified status → bar/text color (no project color involved)
+// pct is optional; when 0 and status is sc-risk it means "not started late" → orange
+function statusColor(st, pct){
+  if(!st) return 'var(--brand)';
+  if(st.c==='sc-done')     return 'var(--g)';
+  if(st.c==='sc-critical') return 'var(--r)';
+  if(st.c==='sc-late')     return '#f97316';           // orange — delayed
+  if(st.c==='sc-risk')     return pct===0?'#f97316':'var(--a)'; // no start yet → orange; behind schedule → amber
+  if(st.c==='sc-ns')       return 'var(--muted)';      // genuinely not started (future)
+  return 'var(--brand)'; // in progress / on track
+}
+
+// Generate a plain-English explanation of the project health RAG.
+function healthReason(p){
+  const todayStr=TODAY.toISOString().split('T')[0];
+  const leaves=p.items.filter(t=>!t.is_summary&&!t.is_milestone);
+  const delayed=leaves.filter(t=>{const s=taskSt(t);return s.c==='sc-critical'||s.c==='sc-late';});
+  const noStart=leaves.filter(t=>taskSt(t).c==='sc-risk'&&t.pct===0);
+  const atRisk=leaves.filter(t=>taskSt(t).c==='sc-risk'&&t.pct>0);
+  const dl=days(todayStr,p.end);
+  if(p.health==='R'){
+    if(dl<0) return `Project is ${Math.abs(dl)}d past its planned finish. ${delayed.length} task${delayed.length!==1?'s':''} overdue.`;
+    return `${delayed.length} overdue task${delayed.length!==1?'s':''} with only ${dl}d left. At ${p.progress}% complete, deadline is at risk.`;
+  }
+  if(p.health==='A'){
+    const parts=[];
+    if(atRisk.length)   parts.push(`${atRisk.length} task${atRisk.length!==1?'s':''} behind expected pace`);
+    if(noStart.length)  parts.push(`${noStart.length} task${noStart.length!==1?'s':''} not started yet`);
+    return (parts.join(', ')||'Some tasks need attention')+`. ${dl>0?dl+'d remaining.':''}`;
+  }
+  return `${p.progress}% complete — progressing on schedule with ${dl>0?dl+'d remaining':Math.abs(dl)+'d past finish'}.`;
+}
+
+// AI-style insights: delayed items + active in-progress items to focus on.
+function InsightsPanel({p}){
+  const todayStr=TODAY.toISOString().split('T')[0];
+  const leaves=p.items.filter(t=>!t.is_summary&&!t.is_milestone&&!t.is_project_root);
+
+  // Delayed/critical tasks
+  const delayed=leaves.filter(t=>{
+    const s=taskSt(t);
+    return s.c==='sc-critical'||s.c==='sc-late'||(s.c==='sc-risk'&&t.pct===0);
+  }).map(t=>{
+    const s=taskSt(t);
+    const od=s.c==='sc-ns'?0:days(t.end,todayStr);
+    return{...t,st:s,od};
+  }).sort((a,b)=>b.od-a.od);
+
+  // Active in-progress (have some progress, end date in future)
+  const active=leaves.filter(t=>{
+    const s=taskSt(t);
+    return (s.c==='sc-on'||s.c==='sc-risk')&&t.pct>0&&t.pct<100;
+  }).map(t=>{
+    const rem=Math.max(0,days(todayStr,t.end));
+    return{...t,st:taskSt(t),rem};
+  }).sort((a,b)=>a.rem-b.rem); // soonest deadline first
+
+  const delayedColor=c=>c==='sc-critical'?'var(--r)':c==='sc-late'||c==='sc-risk'?'#f97316':'var(--a)';
+
+  return(
+    <div className="insights-section">
+      <div className="insights-hd">🤖 Project Intelligence</div>
+      <div className="insights-grid">
+        {/* Left card: items needing attention */}
+        <div className="insight-card">
+          <div className="ic-hdr" style={{color:'var(--r)',borderColor:'var(--border)'}}>
+            ⚠ Needs Attention <span style={{marginLeft:'auto',color:'var(--muted)',fontWeight:400,textTransform:'none',letterSpacing:0}}>{delayed.length} item{delayed.length!==1?'s':''}</span>
+          </div>
+          <div className="ic-body">
+            {delayed.length===0
+              ?<div className="ic-empty">✓ No delayed or stalled tasks</div>
+              :delayed.slice(0,6).map((t,i)=>(
+                <div key={i} className="ic-row">
+                  <span className="ic-name" title={t.title}>{t.title}</span>
+                  <span className="ic-tag" style={{
+                    background:`${delayedColor(t.st.c)}18`,
+                    color:delayedColor(t.st.c),
+                    border:`1px solid ${delayedColor(t.st.c)}40`}}>
+                    {t.st.l}
+                  </span>
+                  <span className="ic-days" style={{color:delayedColor(t.st.c)}}>
+                    {t.od>0?`${t.od}d late`:`0% since ${fmtS(t.start)}`}
+                  </span>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+
+        {/* Right card: active tasks to complete */}
+        <div className="insight-card">
+          <div className="ic-hdr" style={{color:'var(--brand)',borderColor:'var(--border)'}}>
+            🎯 In Progress — Focus <span style={{marginLeft:'auto',color:'var(--muted)',fontWeight:400,textTransform:'none',letterSpacing:0}}>{active.length} item{active.length!==1?'s':''}</span>
+          </div>
+          <div className="ic-body">
+            {active.length===0
+              ?<div className="ic-empty">No tasks currently in progress</div>
+              :active.slice(0,6).map((t,i)=>{
+                  const stC=t.st.c==='sc-risk'?'var(--a)':'var(--brand)';
+                  return(
+                    <div key={i} className="ic-row">
+                      <span className="ic-name" title={t.title}>{t.title}</span>
+                      <span className="ic-tag" style={{
+                        background:`${stC}18`,color:stC,
+                        border:`1px solid ${stC}40`}}>
+                        {Math.round(t.pct)}%
+                      </span>
+                      <span className="ic-days" style={{color:t.rem<=3?'var(--r)':t.rem<=7?'var(--a)':'var(--muted)'}}>
+                        {t.rem===0?'due today':t.rem===1?'1d left':`${t.rem}d left`}
+                      </span>
+                    </div>
+                  );
+                })
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function transformData(raw){
+  return raw.projects.map((p,i)=>{
+    const color=COLORS[i%COLORS.length];
+    // 1. normalise dates & flags
+    const raw_items=p.items.map((t,ri)=>{
+      const startD=t.start.split('T')[0];
+      const endD=t.end.split('T')[0];
+      // Use the MPXJ milestone flag from backend; fall back to date equality only for non-summary tasks
+      // (avoids misclassifying 1-day tasks whose start/end happen to share the same date)
+      const isMsFlag = t.is_milestone===true ? true
+        : (!t.is_summary && startD===endD && t.is_milestone!==false);
+      return{
+        ...t,
+        start:startD,
+        end:endD,
+        level:t.level||1,
+        is_summary:t.is_summary||false,
+        is_milestone:isMsFlag,
+        overridden:t.overridden||false,
+        original_pct:t.original_pct!=null?t.original_pct:t.pct,
+        override_info:t.override_info||null,
+        is_project_root: ri===0 && (t.title===p.name || (p.items.length>1 && (t.is_summary||false))),
+      };
+    });
+    // 2. propagate overrides up through summary rows, then add WBS numbering
+    const items=addWBS(recalcSummaryPcts(raw_items));
+    const leaf=items.filter(t=>!t.is_summary&&!t.is_milestone);
+    const pcts=leaf.map(t=>t.pct);
+    const progress=pcts.length?Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length):0;
+    const ss=items.map(t=>t.start).sort();
+    const ee=items.map(t=>t.end).sort();
+    const pEnd=ee[ee.length-1];
+    return{code:p.code,name:p.name,mpp_path:p.mpp_path||'',
+           pending_overrides:p.pending_overrides||0,
+           color,progress,health:rag(progress,pEnd),start:ss[0],end:pEnd,items};
+  });
+}
+
+// ── API ─────────────────────────────────────────────────────────
+const api = {
+  login: (login) =>
+    fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login})})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail||'Login failed')})),
+
+  portfolio: (username) =>
+    fetch(`/api/portfolio?username=${encodeURIComponent(username||'user')}`).then(r=>r.json()),
+
+  saveOverride: (project,task,value,origVal,username) =>
+    fetch('/api/override',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({project,task,field:'pct',value,original_value:origVal,user:username||'user'})}).then(r=>r.json()),
+
+  deleteOverride: (project,task) =>
+    fetch('/api/override',{method:'DELETE',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({project,task})}).then(r=>r.json()),
+
+  push: (project,username) =>
+    fetch(`/api/push/${encodeURIComponent(project)}?user=${encodeURIComponent(username||'user')}`,{method:'POST'})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail?.message||e.detail||'Push failed')})),
+
+  audit: (limit=200) => fetch(`/api/audit?limit=${limit}`).then(r=>r.json()),
+
+  // ── user management (admin only) ──
+  getUsers: (callerId) =>
+    fetch(`/api/users?caller_id=${encodeURIComponent(callerId)}`).then(r=>r.json()),
+
+  createUser: (callerId,data) =>
+    fetch(`/api/users?caller_id=${encodeURIComponent(callerId)}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail||'Failed')})),
+
+  updateUser: (callerId,userId,data) =>
+    fetch(`/api/users/${userId}?caller_id=${encodeURIComponent(callerId)}`,{method:'PUT',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail||'Failed')})),
+
+  deleteUser: (callerId,userId) =>
+    fetch(`/api/users/${userId}?caller_id=${encodeURIComponent(callerId)}`,{method:'DELETE'})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail||'Failed')})),
+
+  // ── change requests ──
+  submitChangeRequest: (data) =>
+    fetch('/api/change-requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail||'Failed')})),
+
+  getChangeRequests: (callerId,status) =>
+    fetch(`/api/change-requests?caller_id=${encodeURIComponent(callerId)}${status?'&status='+status:''}`)
+      .then(r=>r.json()),
+
+  pendingCRCount: () =>
+    fetch('/api/change-requests/pending-count').then(r=>r.json()),
+
+  reviewChangeRequest: (callerId,requestId,action,reviewer,note) =>
+    fetch(`/api/change-requests/${requestId}/review?caller_id=${encodeURIComponent(callerId)}`,
+      {method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({action,reviewer,review_note:note||''})})
+      .then(r=>r.ok?r.json():r.json().then(e=>{throw new Error(e.detail||'Failed')})),
+};
+
+// ── TOAST COMPONENT ─────────────────────────────────────────────
+function Toast({message,type,onDone}){
+  useEffect(()=>{
+    const t=setTimeout(onDone,4500);
+    return()=>clearTimeout(t);
+  },[message]);
+  if(!message) return null;
+  const bg=type==='success'?'#15803d':type==='error'?'#b91c1c':'#1d4ed8';
+  return <div className="toast" style={{background:bg,opacity:1}}>{message}</div>;
+}
+
+// ── LOGIN SCREEN ─────────────────────────────────────────────────
+function LoginScreen({onLogin}){
+  const [val,setVal]=useState('');
+  const [err,setErr]=useState('');
+  const [busy,setBusy]=useState(false);
+
+  async function doLogin(){
+    const v=val.trim();
+    if(!v){setErr('Please enter your username or email address.');return;}
+    setBusy(true);setErr('');
+    try{
+      const user=await api.login(v);
+      localStorage.setItem('pmUser',JSON.stringify(user));
+      onLogin(user);
+    }catch(e){setErr(e.message);}
+    setBusy(false);
+  }
+
+  const roleDesc={admin:'Full access · all projects',editor:'Can edit assigned projects',viewer:'Read-only access'};
+
+  return(
+    <div className="login-screen">
+      <div className="login-card">
+        <div className="login-logo">
+          <div className="prism-icon">P</div>
+          <div><div className="login-brand">PRISM</div><div className="login-sub">CUBES PMO Dashboard</div></div>
+        </div>
+        <h2>Welcome back</h2>
+        <p style={{color:'var(--muted)',fontSize:13}}>Enter your username or email address to access the dashboard.</p>
+        {err&&<div className="login-err">⚠ {err}</div>}
+        <input className="login-input" type="text" placeholder="e.g. mohammad.hamzeh or …@cubesplatform.com"
+          value={val} onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()} autoFocus/>
+        <button className="login-btn" onClick={doLogin} disabled={busy}>{busy?'Signing in…':'Sign In →'}</button>
+        <div className="login-hint">Contact your administrator if you do not have access.</div>
+      </div>
+    </div>
+  );
+}
+
+// ── ADMIN PANEL ──────────────────────────────────────────────────
+const ROLE_LABELS={admin:'Admin',editor:'Editor',viewer:'Viewer'};
+const FILTER_LABELS={all:'All Projects',cubes:'Cubes Teams',implementation:'Implementation Teams',specific:'Specific List'};
+
+function AdminPanel({currentUser,onClose,onToast,initialTab}){
+  const [tab,setTab]=useState(initialTab||'users'); // 'users' | 'requests'
+  const [users,setUsers]=useState([]);
+  const [requests,setRequests]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [form,setForm]=useState(null);
+  const [fd,setFd]=useState({});
+
+  async function load(){
+    setLoading(true);
+    try{
+      const [ur,cr]=await Promise.all([
+        api.getUsers(currentUser.id),
+        api.getChangeRequests(currentUser.id),
+      ]);
+      setUsers(ur.users);
+      setRequests(cr.requests);
+    }catch(e){onToast('Load failed: '+e.message,'error');}
+    setLoading(false);
+  }
+  useEffect(()=>{load();},[]);
+
+  function openAdd(){
+    setFd({name:'',username:'',email:'',role:'viewer',project_filter:'all',allowed_projects:[],active:true});
+    setForm({mode:'add'});
+  }
+  function openEdit(u){
+    setFd({...u});
+    setForm({mode:'edit',user:u});
+  }
+  function closeForm(){setForm(null);}
+
+  async function saveForm(){
+    try{
+      if(form.mode==='add'){
+        await api.createUser(currentUser.id,{
+          name:fd.name,username:fd.username,email:fd.email,
+          role:fd.role,project_filter:fd.project_filter,
+          allowed_projects:fd.allowed_projects||[],
+        });
+        onToast('User added ✓','success');
+      } else {
+        await api.updateUser(currentUser.id,form.user.id,{
+          name:fd.name,username:fd.username,email:fd.email,
+          role:fd.role,project_filter:fd.project_filter,
+          allowed_projects:fd.allowed_projects||[],
+          active:fd.active,
+        });
+        onToast('User updated ✓','success');
+      }
+      closeForm();
+      load();
+    }catch(e){onToast(e.message,'error');}
+  }
+
+  async function toggleActive(u){
+    try{
+      await api.updateUser(currentUser.id,u.id,{active:!u.active});
+      onToast(u.active?'User deactivated':'User reactivated','success');
+      load();
+    }catch(e){onToast(e.message,'error');}
+  }
+
+  async function doDelete(u){
+    if(u.id===currentUser.id){onToast('Cannot delete your own account.','error');return;}
+    if(!window.confirm(`Delete user "${u.name}"? This cannot be undone.`))return;
+    try{
+      await api.deleteUser(currentUser.id,u.id);
+      onToast('User deleted','success');
+      load();
+    }catch(e){onToast(e.message,'error');}
+  }
+
+  function RoleBadge({role,active}){
+    if(!active) return <span className="role-badge rb-inactive">Inactive</span>;
+    const cls=role==='admin'?'rb-admin':role==='editor'?'rb-editor':'rb-viewer';
+    return <span className={`role-badge ${cls}`}>{ROLE_LABELS[role]||role}</span>;
+  }
+
+  return(
+    <div className="adm-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="adm-panel">
+        <div className="adm-hdr">
+          <h2>👥 User Management</h2>
+          <span style={{fontSize:11,color:'var(--muted)'}}>Admin only · changes take effect immediately</span>
+          <button className="adm-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="adm-body">
+          {/* Tabs */}
+          <div className="adm-tabs">
+            <div className={`adm-tab${tab==='users'?' active':''}`} onClick={()=>setTab('users')}>👥 Users</div>
+            <div className={`adm-tab${tab==='requests'?' active':''}`} onClick={()=>setTab('requests')}>
+              📝 Change Requests
+              {requests.filter(r=>r.status==='pending').length>0&&
+                <span style={{marginLeft:5,background:'var(--r)',color:'#fff',borderRadius:999,padding:'0 5px',fontSize:9,fontWeight:800}}>
+                  {requests.filter(r=>r.status==='pending').length}
+                </span>}
+            </div>
+          </div>
+
+          {tab==='requests'&&(
+            <div>
+              <div className="adm-section-title">Change Requests</div>
+              {loading?<div className="loading">Loading…</div>:requests.length===0
+                ?<div style={{padding:20,color:'var(--dim)',textAlign:'center',fontSize:12}}>No change requests yet.</div>
+                :<table className="utbl">
+                  <thead><tr>
+                    <th>Task</th><th>Project</th><th>From</th><th>To</th>
+                    <th>Reason</th><th>Requested By</th><th>Status</th><th style={{width:150}}>Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {requests.map(r=>(
+                      <tr key={r.id}>
+                        <td style={{fontWeight:600,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.task}>{r.task}</td>
+                        <td style={{fontSize:11,color:'var(--muted)'}}>{r.project}</td>
+                        <td style={{color:'var(--g)',fontWeight:700}}>{r.current_value}%</td>
+                        <td style={{color:'var(--a)',fontWeight:700}}>{r.requested_value}%</td>
+                        <td style={{maxWidth:200,fontSize:11,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.reason}>{r.reason}</td>
+                        <td style={{fontSize:11}}>{r.requested_by}</td>
+                        <td>
+                          <span className={`cr-status-${r.status}`}>{r.status==='pending'?'⏳ Pending':r.status==='approved'?'✓ Approved':'✕ Rejected'}</span>
+                        </td>
+                        <td>
+                          {r.status==='pending'&&(
+                            <div style={{display:'flex',gap:4}}>
+                              <button className="adm-save-btn" style={{fontSize:10,padding:'3px 8px'}}
+                                onClick={async()=>{
+                                  try{
+                                    await api.reviewChangeRequest(currentUser.id,r.id,'approved',currentUser.username,'');
+                                    onToast(`✅ Approved: ${r.task} → ${r.requested_value}%`,'success');
+                                    load();
+                                  }catch(e){onToast(e.message,'error');}
+                                }}>✓ Approve</button>
+                              <button className="adm-cancel-btn" style={{fontSize:10,padding:'3px 8px'}}
+                                onClick={async()=>{
+                                  const note=window.prompt('Rejection reason (optional):','');
+                                  if(note===null) return;
+                                  try{
+                                    await api.reviewChangeRequest(currentUser.id,r.id,'rejected',currentUser.username,note);
+                                    onToast('Request rejected','info');
+                                    load();
+                                  }catch(e){onToast(e.message,'error');}
+                                }}>✕ Reject</button>
+                            </div>
+                          )}
+                          {r.status!=='pending'&&r.review_note&&<span style={{fontSize:10,color:'var(--muted)'}}>{r.review_note}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              }
+            </div>
+          )}
+
+          {tab==='users'&&(
+          <div>
+            <div className="adm-section-title">All Users ({users.length})</div>
+            {loading?<div className="loading">Loading users…</div>:(
+              <table className="utbl">
+                <thead><tr>
+                  <th>Name</th><th>Username</th><th>Email</th>
+                  <th>Role</th><th>Project Access</th><th>Status</th><th style={{width:110}}>Actions</th>
+                </tr></thead>
+                <tbody>
+                  {users.map(u=>(
+                    <tr key={u.id} style={{opacity:u.active?1:.5}}>
+                      <td style={{fontWeight:600}}>{u.name}{u.id===currentUser.id&&<span style={{fontSize:10,color:'var(--brand)',marginLeft:5}}>(you)</span>}</td>
+                      <td style={{fontFamily:'monospace',fontSize:11}}>{u.username}</td>
+                      <td style={{color:'var(--muted)',fontSize:11}}>{u.email}</td>
+                      <td><RoleBadge role={u.role} active={u.active}/></td>
+                      <td style={{fontSize:11}}>{FILTER_LABELS[u.project_filter]||u.project_filter}</td>
+                      <td style={{fontSize:11,color:u.active?'var(--g)':'var(--r)'}}>{u.active?'Active':'Inactive'}</td>
+                      <td style={{display:'flex',gap:4}}>
+                        <button className="adm-act-btn" onClick={()=>openEdit(u)}>Edit</button>
+                        <button className="adm-act-btn" onClick={()=>toggleActive(u)}>{u.active?'Disable':'Enable'}</button>
+                        <button className="adm-act-btn del" onClick={()=>doDelete(u)}>Del</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+          {/* Add user button */}
+          {!form&&<button className="adm-save-btn" style={{alignSelf:'flex-start'}} onClick={openAdd}>+ Add User</button>}
+
+          {/* Add / Edit form */}
+          {form&&(
+            <div className="adm-form">
+              <div className="adm-form-title">{form.mode==='add'?'➕ Add New User':'✏ Edit User — '+form.user.name}</div>
+
+              <div className="adm-field">
+                <label>Full Name *</label>
+                <input value={fd.name||''} onChange={e=>setFd({...fd,name:e.target.value})} placeholder="e.g. John Doe"/>
+              </div>
+              <div className="adm-field">
+                <label>Username *</label>
+                <input value={fd.username||''} onChange={e=>setFd({...fd,username:e.target.value})} placeholder="e.g. john.doe"/>
+              </div>
+              <div className="adm-field" style={{gridColumn:'1/-1'}}>
+                <label>Email Address *</label>
+                <input value={fd.email||''} onChange={e=>setFd({...fd,email:e.target.value})} placeholder="e.g. john.doe@company.com"/>
+              </div>
+              <div className="adm-field">
+                <label>Role</label>
+                <select value={fd.role||'viewer'} onChange={e=>setFd({...fd,role:e.target.value})}>
+                  <option value="viewer">Viewer — read only</option>
+                  <option value="editor">Editor — can edit % (no decrease)</option>
+                  <option value="admin">Admin — full access</option>
+                </select>
+              </div>
+              <div className="adm-field">
+                <label>Project Access</label>
+                <select value={fd.project_filter||'all'} onChange={e=>setFd({...fd,project_filter:e.target.value})}>
+                  <option value="all">All Projects</option>
+                  <option value="cubes">Cubes Teams Only</option>
+                  <option value="implementation">Implementation Teams Only</option>
+                </select>
+              </div>
+              {form.mode==='edit'&&(
+                <div className="adm-field">
+                  <label>Status</label>
+                  <select value={fd.active?'true':'false'} onChange={e=>setFd({...fd,active:e.target.value==='true'})}>
+                    <option value="true">Active</option>
+                    <option value="false">Inactive (blocked)</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="adm-form-actions">
+                <button className="adm-cancel-btn" onClick={closeForm}>Cancel</button>
+                <button className="adm-save-btn" onClick={saveForm}>
+                  {form.mode==='add'?'Create User':'Save Changes'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{fontSize:11,color:'var(--dim)',borderTop:'1px solid var(--border)',paddingTop:10}}>
+            <strong>Roles:</strong> Admin = full access + manage users · Editor = update % (only increase) on allowed projects · Viewer = read-only on allowed projects
+          </div>
+          </div>
+          )} {/* end tab==='users' */}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── REQUEST CHANGE MODAL ─────────────────────────────────────────
+function RequestChangeModal({task,project,user,onClose,onToast}){
+  const [val,setVal]=useState('');
+  const [reason,setReason]=useState('');
+  const [busy,setBusy]=useState(false);
+
+  async function submit(){
+    const v=parseInt(val);
+    if(isNaN(v)||v<0||v>99){onToast('Enter a valid % between 0 and 99','error');return;}
+    if(!reason.trim()){onToast('Please provide a reason','error');return;}
+    setBusy(true);
+    try{
+      await api.submitChangeRequest({
+        project,
+        task:task.title,
+        current_value:task.pct,
+        requested_value:v,
+        reason:reason.trim(),
+        requested_by:user.username,
+      });
+      onToast('📝 Change request submitted — awaiting admin approval','success');
+      onClose();
+    }catch(e){onToast('Submit failed: '+e.message,'error');}
+    setBusy(false);
+  }
+
+  return(
+    <div className="cr-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="cr-modal">
+        <h3>📝 Request Value Change</h3>
+        <p>Task <strong>{task.title}</strong> is at <strong style={{color:'var(--g)'}}>100%</strong> (locked).<br/>
+          Submit a request to the admin to change it.</p>
+        <div className="cr-field">
+          <label>Requested New Value (%)</label>
+          <input type="number" min="0" max="99" placeholder="e.g. 75"
+            value={val} onChange={e=>setVal(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&submit()}/>
+        </div>
+        <div className="cr-field">
+          <label>Reason *</label>
+          <textarea placeholder="Explain why this value needs to be changed…"
+            value={reason} onChange={e=>setReason(e.target.value)}/>
+        </div>
+        <div className="cr-modal-actions">
+          <button className="cr-cancel-btn" onClick={onClose}>Cancel</button>
+          <button className="cr-submit-btn" onClick={submit} disabled={busy}>
+            {busy?'Submitting…':'Submit Request →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SIDEBAR ──────────────────────────────────────────────────────
+function Sidebar({projects,selected,onSelect,onClear,onExport}){
+  const [search,setSearch]=useState('');
+  const [filter,setFilter]=useState('all');
+
+  const visible=projects.filter(p=>(filter==='all'||p.health===filter)&&
+    (p.name.toLowerCase().includes(search.toLowerCase())||p.code.toLowerCase().includes(search.toLowerCase())));
+
+  // Checkbox click → toggle this project in/out of selection (multi-select)
+  function toggleOne(name){
+    const next=new Set(selected);
+    next.has(name)?next.delete(name):next.add(name);
+    onSelect(next);
+  }
+
+  // Row click (outside checkbox) → single-select (or deselect if already sole selection)
+  function selectOne(name){
+    if(selected.size===1&&selected.has(name)) onSelect(new Set());
+    else onSelect(new Set([name]));
+  }
+
+  return (
+    <aside className="sidebar">
+      <div className="sb-logo">
+        <div className="prism-icon">P</div>
+        <div><div className="sb-brand">PRISM</div><div className="sb-sub">CUBES PMO Dashboard</div></div>
+      </div>
+      <div className="sb-block">
+        <div className="sb-lbl">Search</div>
+        <input className="sb-search" placeholder="Filter by name or code…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      </div>
+      <div className="sb-block">
+        <div className="sb-lbl">Filter</div>
+        <select className="sb-sel" value={filter} onChange={e=>setFilter(e.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="G">On Track</option>
+          <option value="A">At Risk</option>
+          <option value="R">Delayed</option>
+        </select>
+      </div>
+      <div style={{padding:'10px 14px 0'}}>
+        <div className="sb-lbl" style={{marginBottom:2}}>Projects</div>
+        <div className="sb-hint">☑ checkbox = multi-select · row = single</div>
+      </div>
+      <div className="proj-list">
+        {visible.length===0 && <div className="empty">No matches</div>}
+        {visible.map(p=>(
+          <div key={p.name} className={`proj-row${selected.has(p.name)?' sel':''}`}
+               onClick={()=>selectOne(p.name)}>
+            {/* Checkbox toggles this project independently without changing others */}
+            <div className="pcheck" onClick={e=>{e.stopPropagation();toggleOne(p.name);}}/>
+            <div className="pdot" style={{background:p.color}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div className="pname">{p.name}</div>
+              <div className="pmeta">{p.progress}% · {fmt(p.start)} → {fmt(p.end)}</div>
+            </div>
+            <span className={`rag rag-${p.health}`}>{ragLabel(p.health)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="sb-foot">
+        <button className="btn" onClick={onClear}>Clear all</button>
+        <button className="btn white" onClick={onExport}>Export PDF</button>
+      </div>
+    </aside>
+  );
+}
+
+// ── KPI ROW ──────────────────────────────────────────────────────
+function KpiRow({projects}){
+  const n=projects.length;
+  const avg=n?Math.round(projects.reduce((s,p)=>s+p.progress,0)/n):0;
+  const g=projects.filter(p=>p.health==='G').length;
+  const a=projects.filter(p=>p.health==='A').length;
+  const r=projects.filter(p=>p.health==='R').length;
+  const dl=n?Math.round(projects.reduce((s,p)=>s+Math.max(0,days(TODAY.toISOString().split('T')[0],p.end)),0)/n):0;
+  return (
+    <div className="kpi-row">
+      <div className="kpi kb"><div className="kl">Portfolio</div><div className="kv" style={{color:'var(--brand)'}}>{avg}%</div><div className="ks">{n} project{n!==1?'s':''}</div></div>
+      <div className="kpi kg"><div className="kl">On Track</div><div className="kv" style={{color:'var(--g)'}}>{g}</div><div className="ks">RAG Green</div></div>
+      <div className="kpi ka"><div className="kl">At Risk</div><div className="kv" style={{color:'var(--a)'}}>{a}</div><div className="ks">RAG Amber</div></div>
+      <div className="kpi kr"><div className="kl">Delayed</div><div className="kv" style={{color:'var(--r)'}}>{r}</div><div className="ks">RAG Red</div></div>
+      <div className="kpi kx"><div className="kl">Avg Days Left</div><div className="kv" style={{fontSize:22}}>{dl}d</div><div className="ks">to deadline</div></div>
+    </div>
+  );
+}
+
+// ── GANTT CHART ──────────────────────────────────────────────────
+function GanttChart({p}){
+  // Exclude the synthetic project root from display
+  const visItems=p.items.filter(t=>!t.is_project_root);
+  const all=visItems.flatMap(t=>[new Date(t.start),new Date(t.end)]);
+  if(!all.length) return null;
+  let mn=new Date(Math.min(...all)),mx=new Date(Math.max(...all));
+  mn.setDate(mn.getDate()-3); mx.setDate(mx.getDate()+8);
+  const span=mx-mn;
+  const pos=d=>clamp(((new Date(d)-mn)/span)*100,0,100);
+  const tPct=pos(TODAY);
+  const showToday=tPct>1&&tPct<99;
+
+  const totalD=days(mn.toISOString().split('T')[0],mx.toISOString().split('T')[0]);
+  const inter=Math.max(7,Math.round(totalD/10));
+  const ticks=[]; const td=new Date(mn);
+  while(td<=mx){ticks.push({p:pos(td),l:fmtS(td)});td.setDate(td.getDate()+inter);}
+
+  return (
+    <div className="gantt-section">
+      <div className="sec-hd">Gantt Chart</div>
+      <div className="g-dhdr">
+        <div className="g-dspacer"/>
+        <div className="g-dates">
+          {ticks.map((t,i)=><div key={i} className="g-tick" style={{left:`${t.p}%`}}>{t.l}</div>)}
+          {showToday && <div className="g-tick g-tick-today" style={{left:`${tPct}%`}}>TODAY</div>}
+        </div>
+      </div>
+      <div style={{position:'relative'}}>
+        {showToday && (
+          <div style={{position:'absolute',top:0,bottom:0,left:240,right:0,pointerEvents:'none',zIndex:5,overflow:'hidden'}}>
+            <div style={{position:'absolute',top:0,bottom:0,left:`${tPct}%`,width:2,background:'rgba(210,40,55,.6)'}}/>
+          </div>
+        )}
+        <div style={{display:'flex',flexDirection:'column',gap:3}}>
+          {visItems.map((t,i)=>{
+            const isMs=t.is_milestone;
+            const l=pos(t.start), r2=pos(t.end), w=Math.max(0.6, r2-l);
+            const st=(!t.is_summary&&!isMs)?taskSt(t):(t.pct>=100?{l:'Completed',c:'sc-done'}:{l:'',c:'sc-on'});
+            const bc=statusColor(st,t.pct);
+            const lc='l'+Math.min(t.level,4);
+            const rowType=t.level===1?'g-row-root':t.is_summary?'g-row-phase':'';
+            // bar shape variant
+            const barCls=t.level===1?'g-bar g-bar-root':t.is_summary?'g-bar g-bar-summary':'g-bar';
+            // tooltip for leaf tasks
+            const tip=(!isMs&&!t.is_summary)?`${t.title}\n${fmt(t.start)} → ${fmt(t.end)}\n${taskStReason(t,st)}`:t.title;
+            return (
+              <div key={i} className={`g-row ${rowType}`}>
+                <div className="g-left">
+                  <div className={`g-lbl ${lc}`} title={t.title}>
+                    {isMs?`◆ ${t.title}`:t.is_summary?`▼ ${t.title}`:t.title}
+                  </div>
+                  <span className="g-pct" style={{color:bc,fontWeight:t.level===1?800:700}}>
+                    {isMs&&t.pct===0?'':t.pct+'%'}
+                  </span>
+                </div>
+                <div className="g-track">
+                  {isMs
+                    /* Milestone diamond */
+                    ? <div className="g-ms" title={tip}
+                           style={{left:`${l}%`,background:bc,borderColor:'rgba(255,255,255,.8)'}}/>
+                    /* Full-duration bar with fill representing completion */
+                    : <div className={barCls} title={tip}
+                           style={{
+                             left:`${l}%`,
+                             width:`${w}%`,
+                             borderColor:`${bc}40`,
+                           }}>
+                        {/* Completion fill */}
+                        <div className="g-bar-fill"
+                             style={{width:`${t.pct}%`, background:bc}}/>
+                      </div>
+                  }
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── TASK ROW (with inline editor) ────────────────────────────────
+function TaskRow({t,p,idx,totalRows,onSaved,onToast,user,onRequestChange}){
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState(Math.round(t.pct));
+  const [saving,setSaving]=useState(false);
+  const inputRef=useRef();
+
+  const role=user?.role||'viewer';
+  const canEdit=role==='admin'||role==='editor';
+  const isAdmin=role==='admin';
+
+  // Keep editor seed in sync with live pct after each reload
+  useEffect(()=>{ if(!editing) setVal(Math.round(t.pct)); },[t.pct,editing]);
+  useEffect(()=>{ if(editing&&inputRef.current){ inputRef.current.focus(); inputRef.current.select(); } },[editing]);
+
+  const isMs=t.is_milestone;
+  const isRoot=t.level===1;
+  // Admins can edit any task (including 100%). Non-admins are blocked at 100%.
+  const isLocked=!isAdmin&&!isRoot&&!t.is_summary&&t.pct>=100;
+  const isEditable=canEdit&&!isRoot&&!t.is_summary&&(t.pct<100||isAdmin);
+  const rowCls=isRoot?'tr-root':t.is_summary?'tr-phase':isMs?'tr-ms':'tr-task';
+  const st=(!t.is_summary&&!isMs)?taskSt(t):(t.pct>=100?{l:'Completed',c:'sc-done'}:null);
+  const stReason=(!t.is_summary&&!isMs&&st)?taskStReason(t,st):'';
+  const dur=days(t.start,t.end);
+  const bc=isMs?(t.pct>=100?'var(--g)':'var(--brand)'):statusColor(st,t.pct);
+
+  // Tree connector
+  function isLastAtLevel(level){
+    for(let j=idx+1;j<totalRows;j++){
+      if(p.items[j].level<level) return true;
+      if(p.items[j].level===level) return false;
+    }
+    return true;
+  }
+  function treePrefix(){
+    if(t.level===1) return '';
+    let prefix='';
+    for(let lv=2;lv<t.level;lv++){
+      let hasCont=false;
+      for(let j=idx+1;j<totalRows;j++){
+        if(p.items[j].level<lv) break;
+        if(p.items[j].level===lv){hasCont=true;break;}
+      }
+      prefix+=hasCont?'│  ':'   ';
+    }
+    return prefix+(isLastAtLevel(t.level)?'└─ ':'├─ ');
+  }
+
+  async function handleSubmit(){
+    const v=parseInt(val);
+    if(isNaN(v)||v<0||v>100) return;
+    const floor=Math.round(t.pct);
+    if(v<floor){
+      if(!isAdmin){
+        // Non-admin: hard block
+        onToast(`Cannot decrease — "${t.title}" is already at ${floor}%. Only an admin can reduce a completed value.`,'error');
+        return;
+      }
+      // Admin: require explicit confirmation for any decrease
+      const ok=window.confirm(
+        `⚠ Admin override — decrease confirmation\n\n` +
+        `Task: "${t.title}"\n` +
+        `Current: ${floor}%  →  New: ${v}%\n\n` +
+        `Reducing a completed percentage requires admin approval.\n` +
+        `Are you sure you want to proceed?`
+      );
+      if(!ok) return;
+    }
+    setSaving(true);
+    try{
+      await api.saveOverride(p.name,t.title,v,t.original_pct,user?.username);
+      onToast('Saved ✓','success');
+      setEditing(false);
+      onSaved();
+    }catch(e){
+      onToast('Save failed: '+e.message,'error');
+    }
+    setSaving(false);
+  }
+
+  async function handleReset(){
+    if(!window.confirm(`Reset "${t.title}" back to MS Project value (${t.original_pct}%)?`)) return;
+    setSaving(true);
+    try{
+      await api.deleteOverride(p.name,t.title);
+      onToast('Reset to MS Project value ✓','success');
+      setEditing(false);
+      onSaved();
+    }catch(e){onToast('Reset failed: '+e.message,'error');}
+    setSaving(false);
+  }
+
+  const typeBadge=isRoot||t.is_summary
+    ?<span className="type-badge t-sum">Summary</span>
+    :isMs?<span className="type-badge t-ms">Milestone</span>
+    :<span className="type-badge t-task">Task</span>;
+
+  const statusEl=isMs
+    ?(()=>{
+        const s=t.pct>=100?{l:'Achieved',c:'sc-ms-ok'}:TODAY>new Date(t.end)?{l:'Missed',c:'sc-ms-miss'}:{l:'Upcoming',c:'sc-ms-up'};
+        const reason=s.c==='sc-ms-miss'?`Milestone missed — was due ${fmt(t.end)}.`
+          :s.c==='sc-ms-ok'?`Milestone achieved.`:`Due on ${fmt(t.end)}.`;
+        return<span className={`sc ${s.c}`} title={reason}>{s.l}</span>;
+      })()
+    :t.is_summary
+    ?(()=>{
+        const s=t.pct>=100?{l:'Completed',c:'sc-done'}:TODAY>new Date(t.end)?{l:'Delayed',c:'sc-late'}:{l:'In Progress',c:'sc-on'};
+        return<span className={`sc ${s.c}`}>{s.l}</span>;
+      })()
+    :<span className={`sc ${st.c}`} title={stReason}>{st.l}</span>;
+
+  // Consistent % cell: number is always right-aligned in fixed 34px slot; edit icon in fixed 10px slot
+  const pctCell=isEditable&&editing
+    ?(<td style={{width:96}}>
+        <div className="pct-editor">
+          <input ref={inputRef} type="number" min={isAdmin?0:Math.round(t.pct)} max="100" value={val} onChange={e=>setVal(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter')handleSubmit();if(e.key==='Escape')setEditing(false);}}/>
+          <button className="pe-ok" onClick={handleSubmit} disabled={saving}>{saving?'…':'✓'}</button>
+          <button className="pe-cancel" onClick={()=>setEditing(false)}>✕</button>
+          {t.overridden&&<button className="pe-reset" onClick={handleReset} title={`Reset to ${t.original_pct}%`}>↺</button>}
+        </div>
+      </td>)
+    :isEditable
+    ?(<td className="pct-edit-cell" style={{width:96}} onClick={()=>setEditing(true)} title="Click to edit %">
+        <div className="pct-cell-inner">
+          <span className="pct-num" style={{color:bc}}>{Math.round(t.pct)}%</span>
+          <span className="pct-edit-icon">✎</span>
+          {t.overridden&&<span className="override-badge" title={t.override_info?`By ${t.override_info.updated_by}`:'Override'}>✏</span>}
+        </div>
+      </td>)
+    :isLocked
+    ?(<td style={{width:96}}>
+        <div className="pct-cell-inner">
+          <span className="pct-num" style={{color:'var(--g)'}}>100%</span>
+          {isAdmin
+            ?<span className="pct-edit-icon" style={{opacity:.4}} title="Admin: click row to edit">🔒</span>
+            :<button className="cr-req-btn" title="Request admin to change this value"
+                onClick={()=>onRequestChange&&onRequestChange(t)}>📝</button>
+          }
+        </div>
+      </td>)
+    :(<td style={{width:96}}>
+        <div className="pct-cell-inner">
+          <span className="pct-num" style={{color:bc}}>{Math.round(t.pct)}%</span>
+          <span className="pct-edit-icon" style={{opacity:0}}/>
+        </div>
+      </td>);
+
+  return (
+    <tr className={rowCls}>
+      <td style={{width:44}}><div className="td-pad" style={{color:'var(--dim)',fontFamily:'monospace',fontSize:11}}>{isRoot?'':t.wbs}</div></td>
+      {pctCell}
+      <td style={{minWidth:260,maxWidth:340}}>
+        <div className="name-cell">
+          <span className="tree-conn">{treePrefix()}</span>
+          <span className="row-icon" style={{color:isMs||t.is_summary?p.color:'var(--dim)'}}>{isMs?'◆':t.is_summary?'▼':'·'}</span>
+          <span className="row-name" title={t.title}>{t.title}</span>
+        </div>
+      </td>
+      <td style={{width:80}}><div className="td-pad">{typeBadge}</div></td>
+      <td><div className="td-pad" style={{fontSize:11,color:isMs?'var(--brand)':'var(--muted)'}}>{fmt(t.start)}</div></td>
+      <td><div className="td-pad" style={{fontSize:11,color:isMs?'var(--brand)':'var(--muted)'}}>{isMs?'—':fmt(t.end)}</div></td>
+      <td><div className="td-pad" style={{fontSize:11,color:'var(--muted)',textAlign:'right'}}>{isMs||dur===0?'—':dur+'d'}</div></td>
+      <td style={{width:60}}>
+        <div className="td-pad">
+          <div className="pbar-wrap">
+            <div className="pbar"><div className="pfill" style={{width:`${t.pct}%`,background:bc}}/></div>
+          </div>
+        </div>
+      </td>
+      <td style={{width:100}}><div className="td-pad">{statusEl}</div></td>
+    </tr>
+  );
+}
+
+// ── TASK TABLE ───────────────────────────────────────────────────
+function TaskTable({p,onSaved,onToast,user,onRequestChange}){
+  // Exclude synthetic project root from display
+  const visItems=p.items.filter(t=>!t.is_project_root);
+  const msCount=visItems.filter(t=>t.is_milestone).length;
+  const summaryCount=visItems.filter(t=>t.is_summary).length;
+  const taskCount=visItems.filter(t=>!t.is_summary&&t.start!==t.end).length;
+  return (
+    <div className="tt-section">
+      <div className="tt-hdr">
+        <h3>Task Plan — {p.name}</h3>
+        <span className="tt-meta">{taskCount} tasks · {summaryCount} summaries · {msCount} milestones</span>
+      </div>
+      <div style={{overflowX:'auto'}}>
+        <table className="msp">
+          <thead><tr>
+            <th style={{width:44}}>WBS</th>
+            <th style={{width:96,textAlign:'right'}}>%</th>
+            <th style={{minWidth:260}}>Task Name</th>
+            <th style={{width:80}}>Type</th>
+            <th style={{width:90}}>Start</th>
+            <th style={{width:90}}>Finish</th>
+            <th style={{width:55,textAlign:'right'}}>Dur.</th>
+            <th style={{width:60}}>Progress</th>
+            <th style={{width:100}}>Status</th>
+          </tr></thead>
+          <tbody>
+            {visItems.map((t,idx)=>(
+              <TaskRow key={idx} t={t} p={p} idx={idx} totalRows={visItems.length}
+                       onSaved={onSaved} onToast={onToast} user={user}
+                       onRequestChange={onRequestChange}/>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── PROJECT SECTION ──────────────────────────────────────────────
+function ProjectSection({p,onSaved,onToast,user}){
+  const [pushing,setPushing]=useState(false);
+  const [crTask,setCrTask]=useState(null); // task for which RequestChangeModal is open
+  const dl=days(TODAY.toISOString().split('T')[0],p.end);
+  const dlC=dl<0?'var(--r)':dl<=7?'var(--a)':'var(--g)';
+  const done=p.items.filter(t=>!t.is_summary&&!t.is_milestone&&t.pct>=100).length;
+  const total=p.items.filter(t=>!t.is_summary&&!t.is_milestone).length;
+  const isAdmin=user?.role==='admin';
+
+  async function handlePush(){
+    if(!isAdmin){onToast('Only admins can push to MS Project.','error');return;}
+    if(!window.confirm(`Push all pending changes for:\n"${p.name}"\n\nMake sure MS Project has this file CLOSED.`)) return;
+    setPushing(true);
+    try{
+      const data=await api.push(p.name,user?.username);
+      onToast(`✅ ${data.message}`,'success');
+      onSaved();
+    }catch(e){
+      onToast(`❌ ${e.message}`,'error');
+    }
+    setPushing(false);
+  }
+
+  return (
+    <div className="proj-section">
+      <div className="ps-hdr">
+        <div className="ps-av" style={{background:`${p.color}18`,color:p.color,border:`1px solid ${p.color}40`}}>
+          {p.code.substring(0,3)}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div className="ps-nm">{p.name}</div>
+          <div className="ps-dt">{fmt(p.start)} → {fmt(p.end)}</div>
+        </div>
+        <div className="ps-mx">
+          <div><div className="ps-mv" style={{color:p.color}}>{p.progress}%</div><div className="ps-ml">Complete</div></div>
+          <div><div className="ps-mv" style={{color:dlC,fontSize:16}}>{dl<0?Math.abs(dl)+'d OD':dl+'d'}</div><div className="ps-ml">{dl<0?'Overdue':'Remaining'}</div></div>
+          <span className={`rag rag-${p.health}`} style={{fontSize:12,padding:'5px 12px'}}>{ragLabel(p.health)}</span>
+          {isAdmin&&(
+            <div className="push-area">
+              {p.pending_overrides>0 && <span className="pending-badge">⚠ {p.pending_overrides} unsaved</span>}
+              <button className="push-btn" onClick={handlePush} disabled={pushing||p.pending_overrides===0}>
+                {pushing?'⏳ Pushing…':'🔄 Push to MS Project'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="ps-bar"><div className="ps-bfill" style={{width:`${p.progress}%`,background:p.color}}/></div>
+
+      {/* Summary strip — 2 columns */}
+      <div className="sumstrip">
+        <div className="sumc">
+          <div className="suml">Tasks Done / Total</div>
+          <div className="sumv">
+            <span style={{color:'var(--g)',fontSize:16}}>✔</span>
+            <span style={{color:'var(--g)',fontWeight:800}}> {done}</span>
+            <span style={{color:'var(--muted)',fontWeight:400,fontSize:12}}> done</span>
+            <span style={{color:'var(--dim)'}}> / </span>
+            <span>{total}</span>
+            <span style={{color:'var(--muted)',fontWeight:400,fontSize:12}}> total</span>
+          </div>
+        </div>
+        <div className="sumc">
+          <div className="suml">Health</div>
+          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            <span className={`rag rag-${p.health}`} style={{fontSize:12}}>{ragLabel(p.health)}</span>
+          </div>
+          <div className="health-reason">{healthReason(p)}</div>
+        </div>
+      </div>
+
+      {/* AI Insights */}
+      <InsightsPanel p={p}/>
+
+      <TaskTable p={p} onSaved={onSaved} onToast={onToast} user={user}
+        onRequestChange={t=>setCrTask(t)}/>
+      <GanttChart p={p}/>
+      {crTask&&<RequestChangeModal task={crTask} project={p.name} user={user}
+        onClose={()=>setCrTask(null)} onToast={onToast}/>}
+    </div>
+  );
+}
+
+// ── AUDIT LOG ────────────────────────────────────────────────────
+function AuditLog(){
+  const [open,setOpen]=useState(false);
+  const [entries,setEntries]=useState([]);
+  const [loading,setLoading]=useState(false);
+
+  async function load(){
+    setLoading(true);
+    try{const d=await api.audit();setEntries(d.entries||[]);}
+    catch(e){setEntries([]);}
+    setLoading(false);
+  }
+
+  function toggle(){
+    const next=!open;
+    setOpen(next);
+    if(next) load();
+  }
+
+  return(
+    <div className="audit-section">
+      <div className="audit-hdr" onClick={toggle}>
+        <h3>📋 Audit Log — Change History</h3>
+        <span style={{fontSize:11,color:'var(--muted)'}}>{open?'▲ Collapse':'▼ Expand'}</span>
+      </div>
+      {open&&(
+        <div style={{overflowX:'auto'}}>
+          {loading
+            ?<div className="loading">Loading audit log…</div>
+            :entries.length===0
+            ?<div style={{padding:24,textAlign:'center',color:'var(--dim)'}}>No audit entries yet. Edit a task % to start tracking.</div>
+            :<table className="atbl">
+              <thead><tr>
+                <th>Timestamp</th><th>Project</th><th>Task</th>
+                <th>Action</th><th>Was</th><th>Now</th><th>By</th><th>MS Project</th>
+              </tr></thead>
+              <tbody>
+                {entries.map(e=>(
+                  <tr key={e.id}>
+                    <td style={{whiteSpace:'nowrap',color:'var(--muted)',fontSize:10}}>{new Date(e.timestamp).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+                    <td style={{fontWeight:600}}>{e.project}</td>
+                    <td style={{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={e.task}>{e.task}</td>
+                    <td>{e.action==='push_to_msp'?<span style={{color:'var(--brand)',fontWeight:700}}>🔄 Pushed</span>:<span style={{textTransform:'capitalize'}}>{e.action.replace(/_/g,' ')}</span>}</td>
+                    <td>{e.old_value!=null?<span style={{color:'var(--r)'}}>{e.old_value}{e.field==='pct'?'%':''}</span>:'—'}</td>
+                    <td>{e.new_value!=null?<span style={{color:'var(--g)'}}>{e.new_value}{e.field==='pct'?'%':''}</span>:'—'}</td>
+                    <td style={{color:'var(--muted)'}}>{e.user}</td>
+                    <td>{e.synced_to_msp?<span className="a-synced">✓ Synced</span>:(e.action!=='push_to_msp'&&<span className="a-pending">⏳ Pending</span>)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ROOT APP ─────────────────────────────────────────────────────
+function App(){
+  const [user,setUser]=useState(()=>{
+    try{const u=localStorage.getItem('pmUser');return u?JSON.parse(u):null;}catch{return null;}
+  });
+  const [projects,setProjects]=useState([]);
+  const [selected,setSelected]=useState(new Set());
+  const [isLight,setIsLight]=useState(true);
+  const [loading,setLoading]=useState(false);
+  const [toast,setToast]=useState(null);
+  const [showAdmin,setShowAdmin]=useState(false);
+  const [adminTab,setAdminTab]=useState('users');
+  const [pendingCR,setPendingCR]=useState(0);
+
+  async function loadProjects(currentUser){
+    const u=currentUser||user;
+    if(!u) return;
+    setLoading(true);
+    try{
+      const raw=await api.portfolio(u.username);
+      setProjects(transformData(raw));
+    }catch(e){
+      showToast('Failed to load: '+e.message,'error');
+    }
+    setLoading(false);
+  }
+
+  useEffect(()=>{
+    document.documentElement.classList.toggle('light',true);
+    if(user){
+      loadProjects(user);
+      // Poll pending change requests every 30s for admins
+      if(user.role==='admin'){
+        const refresh=()=>api.pendingCRCount().then(r=>setPendingCR(r.pending_count)).catch(()=>{});
+        refresh();
+        const iv=setInterval(refresh,30000);
+        return()=>clearInterval(iv);
+      }
+    }
+  },[]);
+
+  function handleLogin(u){
+    setUser(u);
+    loadProjects(u);
+  }
+
+  function handleLogout(){
+    localStorage.removeItem('pmUser');
+    setUser(null);
+    setProjects([]);
+    setSelected(new Set());
+  }
+
+  function toggleMode(){
+    const next=!isLight;
+    setIsLight(next);
+    document.documentElement.classList.toggle('light',next);
+  }
+
+  function showToast(msg,type='info'){
+    setToast({msg,type,key:Date.now()});
+  }
+
+  // Show login screen if not authenticated
+  if(!user) return <LoginScreen onLogin={handleLogin}/>;
+
+  const visible=projects;
+  const active=selected.size?visible.filter(p=>selected.has(p.name)):visible;
+  const initials=user.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+
+  return(
+    <div className="shell">
+      <Sidebar projects={visible} selected={selected}
+               onSelect={setSelected}
+               onClear={()=>setSelected(new Set())}
+               onExport={()=>window.print()}/>
+      <div className="main">
+        <div className="topbar">
+          <div>
+            <div className="tb-title">
+              Portfolio Dashboard
+              <span style={{display:'inline-block',marginLeft:8,padding:'1px 7px',borderRadius:5,fontSize:10,fontWeight:700,background:'rgba(91,103,232,.12)',color:'var(--brand)',border:'1px solid rgba(91,103,232,.25)',verticalAlign:'middle'}}>v1.4</span>
+            </div>
+            <div className="tb-sub">{active.length} project{active.length!==1?'s':''} · Today: {fmt(TODAY)}</div>
+          </div>
+          <div className="grow"/>
+          <span style={{fontSize:11,color:'var(--muted)'}}>{fmtS(TODAY)}</span>
+          {user.role==='admin'&&(
+            <div style={{position:'relative'}}>
+              <button className="admin-btn" onClick={()=>{setAdminTab('users');setShowAdmin(true);}}>👥 Admin</button>
+              {pendingCR>0&&(
+                <span className="notif-badge" style={{cursor:'pointer'}}
+                  onClick={()=>{setAdminTab('requests');setShowAdmin(true);}}>
+                  {pendingCR}
+                </span>
+              )}
+            </div>
+          )}
+          <div className="user-chip">
+            <div className="user-av">{initials}</div>
+            <div><div className="user-nm">{user.name}</div><div className="user-role">{user.role}</div></div>
+          </div>
+          <button className="logout-btn" onClick={handleLogout} title="Sign out">Sign out</button>
+          <button className="mode-btn" onClick={toggleMode} title={isLight?'Switch to dark mode':'Switch to light mode'}>
+            {isLight?'🌙':'☀️'}
+          </button>
+        </div>
+        <div className="content">
+          {loading
+            ?<div className="loading">Connecting to MS Project backend…</div>
+            :active.length===0
+            ?<div className="empty">No projects match.<br/>Click a project in the sidebar to view it.</div>
+            :<>
+              <KpiRow projects={active}/>
+              {active.map(p=>(
+                <ProjectSection key={p.name} p={p}
+                  onSaved={()=>loadProjects()}
+                  onToast={showToast}
+                  user={user}/>
+              ))}
+            </>
+          }
+          <AuditLog/>
+        </div>
+      </div>
+      {toast && <Toast key={toast.key} message={toast.msg} type={toast.type} onDone={()=>setToast(null)}/>}
+      {showAdmin && <AdminPanel currentUser={user} onClose={()=>{setShowAdmin(false);setPendingCR(0);api.pendingCRCount().then(r=>setPendingCR(r.pending_count)).catch(()=>{});}} onToast={showToast} initialTab={adminTab}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
