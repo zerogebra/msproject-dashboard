@@ -417,10 +417,10 @@ def init_db() -> None:
         if not existing_firas:
             firas_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO users (id, name, username, email, role, project_filter, allowed_projects, active, password_hash) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO users (id, name, username, email, role, project_filter, allowed_projects, active, password_hash, plain_password, allowed_products, c2026_access, allowed_modules) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (firas_id, "Firas Saifan", "firas.saifan", firas_email,
-                 "viewer", "implementation", "[]", 1, firas_pw)
+                 "viewer", "implementation", "[]", 1, firas_pw, "Firas@TSME26", "[]", "view", "[]")
             )
 
         # schema v2.0 — allowed_products on users
@@ -538,9 +538,9 @@ def init_db() -> None:
                 default_resources
             )
 
-        # Ensure at least one admin exists
-        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        if count == 0:
+        # Ensure at least one admin exists (check for admin specifically, not just any user)
+        admin_count = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+        if admin_count == 0:
             # Seed the 5 original users if DB was created completely empty (like on Render)
             import hashlib
             def _h(pw): return hashlib.sha256(pw.encode()).hexdigest()
