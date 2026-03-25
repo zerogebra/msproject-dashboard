@@ -417,10 +417,10 @@ def init_db() -> None:
         if not existing_firas:
             firas_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO users (id, name, username, email, role, project_filter, allowed_projects, active, password_hash, plain_password, allowed_products, c2026_access, allowed_modules) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO users (id, name, username, email, role, project_filter, allowed_projects, active, password_hash) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (firas_id, "Firas Saifan", "firas.saifan", firas_email,
-                 "viewer", "implementation", "[]", 1, firas_pw, "Firas@TSME26", "[]", "view", "[]")
+                 "viewer", "implementation", "[]", 1, firas_pw)
             )
 
         # schema v2.0 — allowed_products on users
