@@ -10,4 +10,4 @@ git push
 
 Write-Host ""
 Write-Host "Done! Code pushed to GitHub." -ForegroundColor Green
-Write-Host "https://github.com/zerogebra/project-monitoring" -ForegroundColor Cyan
+Write-Host "https://github.com/zerogebra/msproject-dashboard" -ForegroundColor Cyan
