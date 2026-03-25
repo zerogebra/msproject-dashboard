@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PRISM – PMO Dashboard</title>
+<style>
+:root{
+  --bg:#060912;--s1:#0c1122;--s2:#111827;--s3:#19243a;--s4:#1f2d45;
+  --border:#1b2d4a;--border2:#2a3f5f;
+  --text:#e2e8ff;--muted:#64748b;--dim:#2e4060;
+  --brand:#818cf8;--brand2:#a5b4fc;
+  --g:#34d399;--a:#fbbf24;--r:#fb7185;
+  --g-bg:rgba(52,211,153,.12);--g-bd:rgba(52,211,153,.3);
+  --a-bg:rgba(251,191,36,.12);--a-bd:rgba(251,191,36,.3);
+  --r-bg:rgba(251,113,133,.12);--r-bd:rgba(251,113,133,.3);
+  --rr:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:13px/1.6 'Segoe UI',system-ui,sans-serif}
+
+.shell{display:grid;grid-template-columns:268px 1fr;height:100vh}
+
+/* ── SIDEBAR ─────────────────────────────────────── */
+.sidebar{background:var(--s1);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.sb-logo{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.prism-icon{width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;flex-shrink:0}
+.sb-brand{font-weight:800;font-size:14px;background:linear-gradient(90deg,var(--brand),var(--brand2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sb-sub{font-size:10px;color:var(--muted)}
+.sb-block{padding:10px 14px;border-bottom:1px solid var(--border)}
+.sb-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:7px}
+.sb-search{width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:7px 10px;color:var(--text);font-size:12px}
+.sb-search::placeholder{color:var(--dim)}
+select.sb-sel{width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 8px;font-size:11px;cursor:pointer}
+.proj-list{flex:1;overflow-y:auto;padding:8px}
+.proj-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;border:1px solid transparent;cursor:pointer;transition:.15s;margin-bottom:4px}
+.proj-row:hover{background:var(--s3);border-color:var(--border)}
+.proj-row.sel{background:rgba(129,140,248,.1);border-color:rgba(129,140,248,.4)}
+.pcheck{width:16px;height:16px;border-radius:4px;border:2px solid var(--border2);flex-shrink:0;display:grid;place-items:center}
+.proj-row.sel .pcheck{background:var(--brand);border-color:var(--brand)}
+.proj-row.sel .pcheck::after{content:'✓';color:#fff;font-size:10px;font-weight:700}
+.pdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.pname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmeta{font-size:10px;color:var(--muted)}
+.rag{padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0}
+.rag-G{background:var(--g-bg);color:var(--g);border:1px solid var(--g-bd)}
+.rag-A{background:var(--a-bg);color:var(--a);border:1px solid var(--a-bd)}
+.rag-R{background:var(--r-bg);color:var(--r);border:1px solid var(--r-bd)}
+.sb-foot{padding:12px 14px;border-top:1px solid var(--border);display:flex;gap:8px}
+.btn{padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--s3);color:var(--text);transition:.15s;flex:1;text-align:center}
+.btn:hover{border-color:var(--brand);color:var(--brand2)}
+.btn.white{background:#fff;color:#111;border-color:#e2e8f0}
+.btn.white:hover{background:#f1f5f9;border-color:#cbd5e1}
+
+/* ── MAIN ────────────────────────────────────────── */
+.main{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.topbar{display:flex;align-items:center;gap:12px;padding:11px 20px;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0}
+.tb-title{font-weight:700;font-size:14px}
+.tb-sub{font-size:11px;color:var(--muted)}
+.grow{flex:1}
+select.ctrl{background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:11px;cursor:pointer}
+.content{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+
+/* KPI ROW */
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.kpi{background:var(--s1);border:1px solid var(--border);border-radius:var(--rr);padding:12px 14px;display:flex;flex-direction:column;gap:3px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.kpi.kb::before{background:linear-gradient(90deg,var(--brand),var(--brand2))}
+.kpi.kg::before{background:linear-gradient(90deg,var(--g),#6ee7b7)}
+.kpi.ka::before{background:linear-gradient(90deg,var(--a),#fde68a)}
+.kpi.kr::before{background:linear-gradient(90deg,var(--r),#fca5a5)}
+.kpi.kx::before{background:linear-gradient(90deg,var(--muted),var(--border2))}
+.kl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.kv{font-size:28px;font-weight:800;line-height:1.1}
+.ks{font-size:10px;color:var(--dim)}
+
+/* PROJECT CARD */
+.proj-section{background:var(--s1);border:1px solid var(--border);border-radius:var(--rr);overflow:hidden}
+.ps-hdr{display:flex;align-items:center;gap:12px;padding:13px 16px;background:var(--s2);border-bottom:1px solid var(--border)}
+.ps-av{width:46px;height:46px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:14px;flex-shrink:0}
+.ps-nm{font-size:14px;font-weight:700}
+.ps-dt{font-size:11px;color:var(--muted)}
+.ps-mx{display:flex;align-items:center;gap:16px;flex-shrink:0;margin-left:auto}
+.ps-mv{font-size:22px;font-weight:800;line-height:1}
+.ps-ml{font-size:10px;color:var(--muted);text-transform:uppercase}
+.ps-bar{height:4px;background:var(--s3)}
+.ps-bfill{height:100%;transition:width .5s}
+
+/* SUMMARY STRIP */
+.sumstrip{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--border)}
+.sumc{padding:10px 16px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:4px}
+.sumc:last-child{border-right:none}
+.suml{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.sumv{font-size:13px;font-weight:700}
+.ms-chips{display:flex;flex-wrap:wrap;gap:5px}
+.msc{padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;display:flex;align-items:center;gap:4px}
+.ms-done{background:rgba(52,211,153,.12);color:var(--g);border:1px solid var(--g-bd)}
+.ms-due{background:rgba(129,140,248,.12);color:var(--brand2);border:1px solid rgba(129,140,248,.3)}
+.ms-late{background:rgba(251,113,133,.12);color:var(--r);border:1px solid var(--r-bd)}
+
+/* GANTT */
+.gantt-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+.sec-hd{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec-hd::after{content:'';flex:1;height:1px;background:var(--border)}
+.g-body{display:flex;flex-direction:column;gap:2px}
+.g-row{display:flex;align-items:center;min-height:26px}
+.g-lbl{width:200px;flex-shrink:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px;line-height:1.3}
+.g-lbl.l1{font-weight:700;color:var(--brand2)}
+.g-lbl.l2{font-weight:700;color:var(--text);padding-left:0}
+.g-lbl.l3{color:var(--muted);padding-left:14px}
+.g-lbl.l4{color:var(--dim);padding-left:26px}
+.g-track{flex:1;position:relative;height:20px}
+.g-bar{position:absolute;height:20px;border-radius:5px;overflow:hidden;min-width:3px}
+.g-bar-bg{position:absolute;inset:0;border-radius:5px}
+.g-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px 0 0 4px}
+.g-bar-lbl{position:absolute;left:7px;top:2px;font-size:10px;z-index:1;text-shadow:0 1px 4px rgba(0,0,0,.9);color:#fff;white-space:nowrap}
+.g-ms{position:absolute;top:50%;transform:translate(-50%,-50%) rotate(45deg);width:11px;height:11px;border:2px solid rgba(255,255,255,.7)}
+.g-today{position:absolute;top:0;bottom:0;width:2px;background:rgba(251,113,133,.75);z-index:5}
+.g-today-lbl{position:absolute;top:-14px;font-size:9px;color:var(--r);transform:translateX(-50%);white-space:nowrap;font-weight:700}
+.g-dhdr{display:flex;margin-bottom:6px}
+.g-dspacer{width:200px;flex-shrink:0}
+.g-dates{flex:1;position:relative;height:16px}
+.g-tick{position:absolute;font-size:9px;color:var(--dim);transform:translateX(-50%);border-left:1px dashed rgba(30,60,95,.8);padding-left:3px;height:100%;display:flex;align-items:center}
+
+/* ── MS PROJECT STYLE TASK TABLE ─────────────────── */
+.tt-section{padding-bottom:4px}
+.tt-hdr{display:flex;align-items:center;gap:10px;padding:10px 16px 9px;border-bottom:1px solid var(--border);background:var(--s2)}
+.tt-hdr h3{font-size:12px;font-weight:700}
+.tt-meta{font-size:11px;color:var(--muted)}
+
+table.msp{width:100%;border-collapse:collapse;font-size:12px}
+table.msp th{
+  padding:7px 10px;text-align:left;font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+  border-bottom:2px solid var(--border2);white-space:nowrap;
+  background:var(--s2);position:sticky;top:0;z-index:2
+}
+table.msp td{padding:0;border-bottom:1px solid var(--border);vertical-align:middle}
+.td-pad{padding:0 10px;display:flex;align-items:center;height:100%}
+
+/* Row tiers */
+.tr-root td{background:rgba(129,140,248,.07)!important}
+.tr-root:hover td{background:rgba(129,140,248,.13)!important}
+.tr-phase td{background:rgba(255,255,255,.025)!important}
+.tr-phase:hover td{background:rgba(255,255,255,.05)!important}
+.tr-task:hover td{background:var(--s3)!important}
+.tr-ms td{background:rgba(129,140,248,.03)!important}
+.tr-ms:hover td{background:rgba(129,140,248,.07)!important}
+table.msp tr td{height:34px}
+table.msp tr.tr-root td{height:36px}
+table.msp tr.tr-phase td{height:34px}
+
+/* Name cell tree structure */
+.name-cell{display:flex;align-items:center;min-width:0;gap:0;padding:0 10px}
+/* Tree connector characters before the icon */
+.tree-conn{font-size:10px;color:var(--dim);white-space:pre;flex-shrink:0;font-family:monospace;letter-spacing:0}
+.row-icon{flex-shrink:0;margin-right:5px;font-size:12px;width:14px;text-align:center}
+.row-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Root (level 1 / project summary) */
+.tr-root .row-name{font-weight:700;font-size:13px;color:var(--brand2)}
+.tr-root .row-icon{color:var(--brand)}
+/* Phase (level 2, is_summary) */
+.tr-phase .row-name{font-weight:700;color:var(--text)}
+.tr-phase .row-icon{color:var(--muted)}
+/* Regular task (level 3+) */
+.tr-task .row-name{font-weight:400;color:var(--text)}
+/* Milestone */
+.tr-ms .row-name{color:var(--brand2);font-style:italic}
+.tr-ms .row-icon{color:var(--brand2)}
+
+/* Type badge */
+.type-badge{padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap}
+.t-sum{background:rgba(129,140,248,.12);color:var(--brand2);border:1px solid rgba(129,140,248,.25)}
+.t-task{background:rgba(100,116,139,.1);color:#94a3b8;border:1px solid rgba(100,116,139,.25)}
+.t-ms{background:rgba(129,140,248,.1);color:var(--brand);border:1px solid rgba(129,140,248,.2)}
+
+/* Progress cell */
+.pbar-wrap{display:flex;align-items:center;gap:6px;min-width:90px}
+.pbar{width:52px;height:5px;background:var(--s3);border-radius:999px;overflow:hidden;border:1px solid var(--border);flex-shrink:0}
+.pfill{height:100%;border-radius:999px}
+.pval{font-size:11px;font-weight:700;min-width:30px;text-align:right}
+
+/* Status chips */
+.sc{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap}
+.sc-done{background:rgba(52,211,153,.15);color:#6ee7b7;border:1px solid var(--g-bd)}
+.sc-on{background:rgba(129,140,248,.15);color:#c4b5fd;border:1px solid rgba(129,140,248,.3)}
+.sc-risk{background:rgba(251,191,36,.15);color:#fde68a;border:1px solid var(--a-bd)}
+.sc-late{background:rgba(251,113,133,.15);color:#fda4af;border:1px solid var(--r-bd)}
+.sc-ns{background:rgba(100,116,139,.12);color:#94a3b8;border:1px solid rgba(100,116,139,.3)}
+.sc-ms-ok{background:rgba(52,211,153,.12);color:var(--g);border:1px solid var(--g-bd)}
+.sc-ms-miss{background:rgba(251,113,133,.12);color:var(--r);border:1px solid var(--r-bd)}
+.sc-ms-up{background:rgba(129,140,248,.1);color:var(--brand2);border:1px solid rgba(129,140,248,.2)}
+
+.empty{padding:40px;text-align:center;color:var(--dim);font-size:14px}
+.loading{padding:40px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sb-logo">
+    <div class="prism-icon">P</div>
+    <div><div class="sb-brand">PRISM</div><div class="sb-sub">CUBES PMO Dashboard</div></div>
+  </div>
+  <div class="sb-block">
+    <div class="sb-lbl">Search</div>
+    <input id="search" class="sb-search" placeholder="Filter by name or code…"/>
+  </div>
+  <div class="sb-block">
+    <div class="sb-lbl">Filter</div>
+    <select id="filterStatus" class="sb-sel">
+      <option value="all">All statuses</option>
+      <option value="G">On Track</option>
+      <option value="A">At Risk</option>
+      <option value="R">Delayed</option>
+    </select>
+  </div>
+  <div class="sb-lbl" style="padding:10px 14px 4px">Projects</div>
+  <div id="projList" class="proj-list"><div class="loading">Loading…</div></div>
+  <div class="sb-foot">
+    <button class="btn" id="clearBtn">Clear all</button>
+    <button class="btn white" id="exportBtn">Export PDF</button>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div>
+      <div class="tb-title">Portfolio Dashboard</div>
+      <div class="tb-sub" id="topSub">Loading…</div>
+    </div>
+    <div class="grow"></div>
+    <select id="windowSel" class="ctrl">
+      <option value="8">8 weeks</option>
+      <option value="12" selected>12 weeks</option>
+      <option value="24">24 weeks</option>
+    </select>
+    <span id="todayLbl" style="font-size:11px;color:var(--muted)"></span>
+  </div>
+  <div class="content" id="content">
+    <div class="loading">Connecting to MS Project backend…</div>
+  </div>
+</div>
+</div><!-- shell -->
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const today = new Date(); today.setHours(0,0,0,0);
+const fmt  = d => new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+const fmtS = d => new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+const days = (a,b) => Math.round((new Date(b)-new Date(a))/864e5);
+const clamp = (v,a,b) => Math.min(b,Math.max(a,v));
+
+const COLORS = ['#818cf8','#0ea5e9','#10b981','#f59e0b','#ec4899','#14b8a6'];
+
+// ── health ──────────────────────────────────────────────────────
+function rag(pct,end){
+  if(pct>=100) return 'G';
+  if(today>new Date(end)&&pct<100) return 'R';
+  return pct>=50?'G':pct>=20?'A':'R';
+}
+function ragLabel(r){return r==='G'?'On Track':r==='A'?'At Risk':'Delayed';}
+
+// ── task status (schedule variance aware) ──────────────────────
+function taskSt(t){
+  if(t.pct>=100) return{l:'Completed',c:'sc-done'};
+  if(today>new Date(t.end))  return{l:'Delayed',c:'sc-late'};
+  if(today<new Date(t.start)) return{l:'Not Started',c:'sc-ns'};
+  const tot=Math.max(1,days(t.start,t.end));
+  const elap=clamp(days(t.start,today.toISOString().split('T')[0]),0,tot);
+  const exp=Math.round(elap/tot*100);
+  return t.pct>=exp-5?{l:'On Track',c:'sc-on'}:{l:'At Risk',c:'sc-risk'};
+}
+
+// ── WBS numbering ──────────────────────────────────────────────
+function addWBS(items){
+  const ctr=[0,0,0,0,0];
+  return items.map(t=>{
+    const lv=t.level-1;
+    ctr[lv]++;
+    for(let i=lv+1;i<ctr.length;i++) ctr[i]=0;
+    const wbs=ctr.slice(0,t.level).join('.');
+    return{...t,wbs};
+  });
+}
+
+// ── transform raw API ──────────────────────────────────────────
+function transform(raw){
+  return raw.projects.map((p,i)=>{
+    const color=COLORS[i%COLORS.length];
+    const items=addWBS(p.items.map(t=>({
+      ...t,
+      start:t.start.split('T')[0],
+      end:t.end.split('T')[0],
+      level:t.level||1,
+      is_summary:t.is_summary||false
+    })));
+    const leaf=items.filter(t=>!t.is_summary&&t.start!==t.end);
+    const pcts=leaf.map(t=>t.pct);
+    const progress=pcts.length?Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length):0;
+    const ss=items.map(t=>t.start).sort();
+    const ee=items.map(t=>t.end).sort();
+    const pEnd=ee[ee.length-1];
+    return{code:p.code,name:p.name,color,progress,health:rag(progress,pEnd),
+           start:ss[0],end:pEnd,items};
+  });
+}
+
+let projects=[], selected=new Set();
+function getVisible(){
+  const q=$('#search').value.toLowerCase();
+  const f=$('#filterStatus').value;
+  return projects.filter(p=>(f==='all'||p.health===f)&&
+    (p.name.toLowerCase().includes(q)||p.code.toLowerCase().includes(q)));
+}
+function getActive(){
+  const v=getVisible();
+  return selected.size?v.filter(p=>selected.has(p.code)):v;
+}
+
+// ── SIDEBAR ────────────────────────────────────────────────────
+function renderSidebar(){
+  const vis=getVisible();
+  const el=$('#projList');
+  if(!vis.length){el.innerHTML='<div class="empty">No matches</div>';return;}
+  el.innerHTML=vis.map(p=>`
+    <div class="proj-row ${selected.has(p.code)?'sel':''}" data-code="${p.code}">
+      <div class="pcheck"></div>
+      <div class="pdot" style="background:${p.color}"></div>
+      <div style="flex:1;min-width:0">
+        <div class="pname">${p.name}</div>
+        <div class="pmeta">${p.progress}% · ${fmt(p.start)} → ${fmt(p.end)}</div>
+      </div>
+      <span class="rag rag-${p.health}">${ragLabel(p.health)}</span>
+    </div>`).join('');
+  $$('.proj-row').forEach(r=>r.addEventListener('click',()=>{
+    const c=r.dataset.code;
+    selected.has(c)?selected.delete(c):selected.add(c);
+    renderAll();
+  }));
+}
+
+// ── KPIs ───────────────────────────────────────────────────────
+function renderKpis(active){
+  const n=active.length;
+  const avg=n?Math.round(active.reduce((s,p)=>s+p.progress,0)/n):0;
+  const g=active.filter(p=>p.health==='G').length;
+  const a=active.filter(p=>p.health==='A').length;
+  const r=active.filter(p=>p.health==='R').length;
+  const dl=n?Math.round(active.reduce((s,p)=>s+Math.max(0,days(today.toISOString().split('T')[0],p.end)),0)/n):0;
+  return`<div class="kpi-row">
+    <div class="kpi kb"><div class="kl">Portfolio</div><div class="kv" style="color:var(--brand2)">${avg}%</div><div class="ks">${n} project${n!==1?'s':''}</div></div>
+    <div class="kpi kg"><div class="kl">On Track</div><div class="kv" style="color:var(--g)">${g}</div><div class="ks">RAG Green</div></div>
+    <div class="kpi ka"><div class="kl">At Risk</div><div class="kv" style="color:var(--a)">${a}</div><div class="ks">RAG Amber</div></div>
+    <div class="kpi kr"><div class="kl">Delayed</div><div class="kv" style="color:var(--r)">${r}</div><div class="ks">RAG Red</div></div>
+    <div class="kpi kx"><div class="kl">Avg Days Left</div><div class="kv" style="font-size:22px">${dl}d</div><div class="ks">to deadline</div></div>
+  </div>`;
+}
+
+// ── GANTT ──────────────────────────────────────────────────────
+function renderGantt(p){
+  const all=p.items.flatMap(t=>[new Date(t.start),new Date(t.end)]);
+  let mn=new Date(Math.min(...all)),mx=new Date(Math.max(...all));
+  mn.setDate(mn.getDate()-3); mx.setDate(mx.getDate()+8);
+  const span=mx-mn;
+  const pos=d=>clamp(((new Date(d)-mn)/span)*100,0,100);
+  const tPct=pos(today);
+
+  const totalD=days(mn.toISOString().split('T')[0],mx.toISOString().split('T')[0]);
+  const inter=Math.max(7,Math.round(totalD/10));
+  const ticks=[]; const td=new Date(mn);
+  while(td<=mx){ticks.push({p:pos(td),l:fmtS(td)});td.setDate(td.getDate()+inter);}
+
+  const dateHdr=`<div class="g-dhdr">
+    <div class="g-dspacer"></div>
+    <div class="g-dates">
+      ${ticks.map(t=>`<div class="g-tick" style="left:${t.p}%">${t.l}</div>`).join('')}
+      <div style="position:absolute;left:${tPct}%;top:0;bottom:-9999px;width:1px;background:rgba(251,113,133,.3)"></div>
+    </div>
+  </div>`;
+
+  const rows=p.items.map(t=>{
+    const isMs=t.start===t.end;
+    const l=pos(t.start),r=pos(t.end),w=Math.max(.4,r-l);
+    const st=taskSt(t);
+    const bc=t.pct>=100?'var(--g)':st.c==='sc-late'?'var(--r)':st.c==='sc-risk'?'var(--a)':p.color;
+    const lc='l'+Math.min(t.level,4);
+    if(isMs) return`<div class="g-row">
+      <div class="g-lbl ${lc}" title="◆ ${t.title}">◆ ${t.title}</div>
+      <div class="g-track">
+        <div class="g-ms" style="left:${l}%;background:${t.pct>=100?'var(--g)':p.color};border-color:rgba(255,255,255,.5)"></div>
+        <div class="g-today" style="left:${tPct}%"></div>
+      </div></div>`;
+    return`<div class="g-row">
+      <div class="g-lbl ${lc}" title="${t.title}">${t.title}</div>
+      <div class="g-track">
+        <div class="g-bar" style="left:${l}%;width:${w}%">
+          <div class="g-bar-bg" style="background:${bc}33;border:1px solid ${bc}44"></div>
+          <div class="g-bar-fill" style="width:${t.pct}%;background:${bc}"></div>
+          <span class="g-bar-lbl">${t.pct>7?t.pct+'%':''}</span>
+        </div>
+        <div class="g-today" style="left:${tPct}%">
+          ${tPct>2&&tPct<97?`<div class="g-today-lbl">Today</div>`:''}
+        </div>
+      </div></div>`;
+  }).join('');
+
+  return`<div class="gantt-section">
+    <div class="sec-hd">Gantt Chart</div>
+    ${dateHdr}<div class="g-body">${rows}</div>
+  </div>`;
+}
+
+// ── MS PROJECT TASK TABLE ──────────────────────────────────────
+function renderTaskTable(p){
+  // Determine which items are last children at their level (for └─ vs ├─)
+  const n=p.items.length;
+
+  function isLastAtLevel(idx,level){
+    for(let j=idx+1;j<n;j++){
+      if(p.items[j].level<level) return true;   // parent closed before another sibling
+      if(p.items[j].level===level) return false; // sibling exists
+    }
+    return true;
+  }
+
+  // Build tree connector prefix for each item
+  function treePrefix(idx,item){
+    if(item.level===1) return '';           // root: no connector
+    const last=isLastAtLevel(idx,item.level);
+    // For each ancestor level (from 2 to item.level-1) decide │ or space
+    let prefix='';
+    for(let lv=2;lv<item.level;lv++){
+      // Is there a sibling at this ancestor level below us?
+      let hasContinuation=false;
+      for(let j=idx+1;j<n;j++){
+        if(p.items[j].level<lv) break;
+        if(p.items[j].level===lv){hasContinuation=true;break;}
+      }
+      prefix+= hasContinuation ? '│  ' : '   ';
+    }
+    prefix += last ? '└─ ' : '├─ ';
+    return prefix;
+  }
+
+  const rows=p.items.map((t,idx)=>{
+    const isMs=t.start===t.end;
+    const isRoot=t.level===1;
+    const isPhase=t.is_summary&&t.level===2;
+    const isSummaryDeep=t.is_summary&&t.level>2;
+    const isLeaf=!t.is_summary&&!isMs;
+
+    const rowCls=isRoot?'tr-root':isPhase?'tr-phase':isMs?'tr-ms':'tr-task';
+    const st=(!t.is_summary&&!isMs)?taskSt(t):null;
+    const dur=days(t.start,t.end);
+    const bc=t.pct>=100?'var(--g)':st?st.c==='sc-late'?'var(--r)':st.c==='sc-risk'?'var(--a)':p.color:p.color;
+
+    // Row type badge
+    const typeBadge=isRoot||t.is_summary
+      ?`<span class="type-badge t-sum">Summary</span>`
+      :isMs?`<span class="type-badge t-ms">Milestone</span>`
+      :`<span class="type-badge t-task">Task</span>`;
+
+    // Icon
+    const icon=isMs?'◆':t.is_summary?'▼':'·';
+
+    // Tree connector
+    const prefix=treePrefix(idx,t);
+
+    // Name cell
+    const nameCell=`<td style="min-width:260px;max-width:320px">
+      <div class="name-cell">
+        <span class="tree-conn">${prefix}</span>
+        <span class="row-icon" style="color:${isMs||t.is_summary?p.color:'var(--dim)'}">${icon}</span>
+        <span class="row-name" title="${t.title}">${t.title}</span>
+      </div>
+    </td>`;
+
+    // WBS cell (skip for root row 1)
+    const wbsCell=`<td><div class="td-pad" style="color:var(--dim);font-family:monospace;font-size:11px">${isRoot?'':t.wbs}</div></td>`;
+
+    // Type cell
+    const typeCell=`<td><div class="td-pad">${typeBadge}</div></td>`;
+
+    // Date cells
+    const startCell=`<td><div class="td-pad" style="font-size:11px;color:${isMs?'var(--brand2)':'var(--muted)'}">${fmt(t.start)}</div></td>`;
+    const endCell=`<td><div class="td-pad" style="font-size:11px;color:${isMs?'var(--brand2)':'var(--muted)'}">${isMs?'—':fmt(t.end)}</div></td>`;
+
+    // Duration cell
+    const durCell=`<td><div class="td-pad" style="font-size:11px;color:var(--muted);text-align:right">${isMs||dur===0?'—':dur+'d'}</div></td>`;
+
+    // Progress cell
+    const pctCell=t.is_summary||isMs?
+      `<td><div class="td-pad">
+        <div class="pbar-wrap">
+          <div class="pbar"><div class="pfill" style="width:${t.pct}%;background:${bc}"></div></div>
+          <span class="pval" style="color:${bc}">${t.pct}%</span>
+        </div>
+      </div></td>`
+      :`<td><div class="td-pad">
+        <div class="pbar-wrap">
+          <div class="pbar"><div class="pfill" style="width:${t.pct}%;background:${bc}"></div></div>
+          <span class="pval" style="color:${bc}">${t.pct}%</span>
+        </div>
+      </div></td>`;
+
+    // Status cell
+    let statusCell;
+    if(isMs){
+      const msS=t.pct>=100?{l:'Achieved',c:'sc-ms-ok'}:today>new Date(t.end)?{l:'Missed',c:'sc-ms-miss'}:{l:'Upcoming',c:'sc-ms-up'};
+      statusCell=`<td><div class="td-pad"><span class="sc ${msS.c}">${msS.l}</span></div></td>`;
+    } else if(t.is_summary){
+      const sS=t.pct>=100?{l:'Completed',c:'sc-done'}:today>new Date(t.end)?{l:'Delayed',c:'sc-late'}:{l:'In Progress',c:'sc-on'};
+      statusCell=`<td><div class="td-pad"><span class="sc ${sS.c}">${sS.l}</span></div></td>`;
+    } else {
+      statusCell=`<td><div class="td-pad"><span class="sc ${st.c}">${st.l}</span></div></td>`;
+    }
+
+    return`<tr class="${rowCls}">
+      ${wbsCell}${nameCell}${typeCell}${startCell}${endCell}${durCell}${pctCell}${statusCell}
+    </tr>`;
+  }).join('');
+
+  const summaryCount=p.items.filter(t=>t.is_summary).length;
+  const msCount=p.items.filter(t=>t.start===t.end).length;
+  const taskCount=p.items.filter(t=>!t.is_summary&&t.start!==t.end).length;
+
+  return`<div class="tt-section">
+    <div class="tt-hdr">
+      <h3>Task Plan — ${p.name}</h3>
+      <span class="tt-meta">${taskCount} tasks · ${summaryCount} summaries · ${msCount} milestones</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="msp">
+        <thead><tr>
+          <th style="width:40px">WBS</th>
+          <th style="min-width:260px">Task Name</th>
+          <th style="width:80px">Type</th>
+          <th style="width:90px">Start</th>
+          <th style="width:90px">Finish</th>
+          <th style="width:60px;text-align:right">Dur.</th>
+          <th style="width:100px">Progress</th>
+          <th style="width:100px">Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ── PROJECT SECTION ────────────────────────────────────────────
+function renderProject(p){
+  const dl=days(today.toISOString().split('T')[0],p.end);
+  const dlC=dl<0?'var(--r)':dl<=7?'var(--a)':'var(--g)';
+  const done=p.items.filter(t=>!t.is_summary&&t.start!==t.end&&t.pct>=100).length;
+  const total=p.items.filter(t=>!t.is_summary&&t.start!==t.end).length;
+  const milestones=p.items.filter(t=>t.start===t.end).slice(0,4);
+
+  const msHtml=milestones.map(t=>{
+    const cls=t.pct>=100?'ms-done':new Date(t.end)<today?'ms-late':'ms-due';
+    return`<div class="msc ${cls}">${t.pct>=100?'✓':new Date(t.end)<today?'✕':'◆'} ${t.title}</div>`;
+  }).join('') || '<span style="color:var(--dim);font-size:11px">None</span>';
+
+  return`<div class="proj-section">
+    <div class="ps-hdr">
+      <div class="ps-av" style="background:${p.color}1a;color:${p.color};border:1px solid ${p.color}44">${p.code.substring(0,3)}</div>
+      <div style="flex:1;min-width:0">
+        <div class="ps-nm">${p.name}</div>
+        <div class="ps-dt">${fmt(p.start)} → ${fmt(p.end)}</div>
+      </div>
+      <div class="ps-mx">
+        <div><div class="ps-mv" style="color:${p.color}">${p.progress}%</div><div class="ps-ml">Complete</div></div>
+        <div><div class="ps-mv" style="color:${dlC};font-size:16px">${dl<0?Math.abs(dl)+'d OD':dl+'d'}</div><div class="ps-ml">${dl<0?'Overdue':'Remaining'}</div></div>
+        <span class="rag rag-${p.health}" style="font-size:12px;padding:5px 12px">${ragLabel(p.health)}</span>
+      </div>
+    </div>
+    <div class="ps-bar"><div class="ps-bfill" style="width:${p.progress}%;background:${p.color}"></div></div>
+    <div class="sumstrip">
+      <div class="sumc"><div class="suml">Tasks Done / Total</div><div class="sumv">${done} / ${total} <span style="color:var(--muted);font-weight:400">tasks</span></div></div>
+      <div class="sumc"><div class="suml">Milestones</div><div class="ms-chips">${msHtml}</div></div>
+      <div class="sumc"><div class="suml">Health</div><div class="sumv"><span class="rag rag-${p.health}" style="font-size:12px">${ragLabel(p.health)}</span></div></div>
+    </div>
+    ${renderGantt(p)}
+    ${renderTaskTable(p)}
+  </div>`;
+}
+
+// ── RENDER ALL ─────────────────────────────────────────────────
+function renderAll(){
+  renderSidebar();
+  const active=getActive();
+  $('#topSub').textContent=`${active.length} project${active.length!==1?'s':''} · Today: ${fmt(today)}`;
+  $('#todayLbl').textContent='Today: '+fmtS(today);
+  if(!active.length){
+    $('#content').innerHTML='<div class="empty">No projects selected.<br>Click a project in the sidebar to view it.</div>';
+    return;
+  }
+  $('#content').innerHTML=[renderKpis(active),...active.map(renderProject)].join('');
+}
+
+// ── BOOT ───────────────────────────────────────────────────────
+(async()=>{
+  try{
+    const res=await fetch('/api/portfolio?username=mhamzeh');
+    projects=transform(await res.json());
+    renderAll();
+  }catch(e){
+    $('#content').innerHTML=`<div class="empty" style="color:var(--r)">Failed to load: ${e.message}<br>Make sure the FastAPI server is running on port 8000.</div>`;
+  }
+  $('#search').addEventListener('input',renderAll);
+  $('#filterStatus').addEventListener('change',renderAll);
+  $('#windowSel').addEventListener('change',renderAll);
+  $('#clearBtn').addEventListener('click',()=>{selected.clear();renderAll();});
+  $('#exportBtn').addEventListener('click',()=>window.print());
+})();
+</script>
+</body>
+</html>

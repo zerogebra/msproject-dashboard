@@ -1,0 +1,15 @@
+﻿services:
+  - type: web
+    name: prism-pmo-dashboard
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: MPP_ROOT
+        value: ./mpp
+      - key: MPXJ_JAR
+        value: ./libs/mpxj-all-15.3.1.jar

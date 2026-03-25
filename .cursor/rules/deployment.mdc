@@ -1,0 +1,65 @@
+---
+description: Deployment rules — git push, database handling, and future PostgreSQL migration
+alwaysApply: true
+---
+
+# Deployment & Database Rules
+
+## Git Push — ALWAYS include the database
+
+When the user asks to push code to GitHub, ALWAYS include `data/prism.db`:
+```bash
+git add .
+git commit -m "message"
+git push
+```
+The `.gitignore` correctly excludes `*.db-shm` and `*.db-wal` but NOT `prism.db` — this is intentional.
+
+## Current Stack
+- **Runtime DB**: SQLite at `data/prism.db`
+- **Hosting**: Render free tier (ephemeral disk — DB resets on restart unless pushed via git)
+- **Start command**: `python3.11 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- **GitHub → Render**: auto-deploy on push (one-way, Render never pushes back to GitHub)
+
+## Future: Migrate to Render PostgreSQL (user requested, do when asked)
+
+When the user says "add PostgreSQL" or "migrate to PostgreSQL", do the following:
+
+### 1. Add `psycopg2-binary` to `requirements.txt`
+### 2. Update `app/database.py`
+- Read `DATABASE_URL` env var; if set use PostgreSQL, else fall back to SQLite
+- Replace `sqlite3` with `psycopg2` for PostgreSQL connections
+- Change `?` placeholders to `%s` for PostgreSQL
+- Change `INTEGER PRIMARY KEY AUTOINCREMENT` to `SERIAL PRIMARY KEY`
+
+### 3. Update `render.yaml`
+```yaml
+databases:
+  - name: prism-db
+    plan: free
+    databaseName: prism
+    user: prism_user
+
+services:
+  - type: web
+    name: prism-pmo-dashboard
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: prism-db
+          property: connectionString
+```
+
+### 4. Remove `data/prism.db` from git tracking
+```bash
+git rm --cached data/prism.db
+echo "data/prism.db" >> .gitignore
+```
+
+### Benefits after migration
+- All runtime changes (user updates, project edits) persist permanently on Render
+- No data loss on restart/redeploy
+- Local dev still uses SQLite automatically (no DATABASE_URL set locally)

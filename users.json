@@ -1,0 +1,54 @@
+{
+  "users": [
+    {
+      "id": "u1",
+      "name": "Mohammad Hamzeh",
+      "username": "mohammad.hamzeh",
+      "email": "mohammad.hamzeh@cubesplatform.com",
+      "role": "admin",
+      "project_filter": "all",
+      "allowed_projects": [],
+      "active": true
+    },
+    {
+      "id": "u2",
+      "name": "Anas Abdelhadi",
+      "username": "anas.abdelhadi",
+      "email": "anas.abdelhadi@cubesplatform.com",
+      "role": "editor",
+      "project_filter": "cubes",
+      "allowed_projects": [],
+      "active": true
+    },
+    {
+      "id": "u3",
+      "name": "Rawad Khallad",
+      "username": "rawad.khallad",
+      "email": "rawad.khallad@cubesplatform.com",
+      "role": "editor",
+      "project_filter": "cubes",
+      "allowed_projects": [],
+      "active": true
+    },
+    {
+      "id": "u4",
+      "name": "Mohammad Younes",
+      "username": "mohammad.younes",
+      "email": "mohammad.younes@cubesplatform.com",
+      "role": "viewer",
+      "project_filter": "all",
+      "allowed_projects": [],
+      "active": true
+    },
+    {
+      "id": "u5",
+      "name": "Dima Hamodi",
+      "username": "dima.hamodi",
+      "email": "dima.hamodi@tsmesolutions.com",
+      "role": "viewer",
+      "project_filter": "implementation",
+      "allowed_projects": [],
+      "active": true
+    }
+  ]
+}

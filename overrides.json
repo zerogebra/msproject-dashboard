@@ -1,0 +1,51 @@
+{
+  "projects": {
+    "ICP-CubesTeam": {
+      "tasks": {}
+    },
+    "EFCR-CubesTeam": {
+      "tasks": {
+        "QC Test Preparation": {
+          "pct": 100.0,
+          "original_pct": 0.0,
+          "updated_by": "mohammad.hamzeh",
+          "updated_at": "2026-03-08T15:06:53.819166"
+        },
+        "Backend Development (BE)": {
+          "pct": 10.0,
+          "original_pct": 10.0,
+          "updated_by": "mhamzeh",
+          "updated_at": "2026-03-08T14:34:35.825386"
+        },
+        "UI/UX Design": {
+          "pct": 100.0,
+          "original_pct": 0.0,
+          "updated_by": "mohammad.hamzeh",
+          "updated_at": "2026-03-08T15:06:46.378455"
+        }
+      }
+    },
+    "EFCR-ImpTeam": {
+      "tasks": {
+        "Backend Development (BE)": {
+          "pct": 10.0,
+          "original_pct": 0.0,
+          "updated_by": "mohammad.hamzeh",
+          "updated_at": "2026-03-08T15:12:57.698999"
+        },
+        "UI/UX Design": {
+          "pct": 100.0,
+          "original_pct": 0.0,
+          "updated_by": "mohammad.hamzeh",
+          "updated_at": "2026-03-08T15:38:54.588643"
+        },
+        "QC Test Preparation": {
+          "pct": 100.0,
+          "original_pct": 0.0,
+          "updated_by": "mohammad.hamzeh",
+          "updated_at": "2026-03-08T15:39:10.231002"
+        }
+      }
+    }
+  }
+}

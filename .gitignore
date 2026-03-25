@@ -1,0 +1,42 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+.venv
+env/
+venv/
+venv311/
+ENV/
+
+# Local-only data (override these per-file below)
+data/audit_log.json
+data/overrides.json
+data/users.json
+data/change_requests.json
+
+# SQLite WAL files (temporary â€” the main .db is committed)
+*.db-shm
+*.db-wal
+
+# MS Project files (stay local only)
+*.mpp
+/mpp/
+
+# Java / JRE (large, platform-specific)
+/libs/
+/jre/
+jre.zip
+
+# Debug / scratch files
+debug_*.py
+qc_check.py
+*.txt
+!README.txt
+audit_log.txt
+conversation_log.txt
+
+# Backups
+backup_*/
