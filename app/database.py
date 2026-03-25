@@ -542,15 +542,28 @@ def init_db() -> None:
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if count == 0:
             # Seed the 5 original users if DB was created completely empty (like on Render)
+            import hashlib
+            def _h(pw): return hashlib.sha256(pw.encode()).hexdigest()
+            # (id, name, username, email, role, project_filter, allowed_projects, active,
+            #  password_hash, plain_password, allowed_products, c2026_access, allowed_modules)
             default_users = [
-                ("u1", "Mohammad Hamzeh", "mohammad.hamzeh", "mohammad.hamzeh@cubesplatform.com", "admin", "all", "[]", 1),
-                ("u2", "Anas Abdelhadi", "anas.abdelhadi", "anas.abdelhadi@cubesplatform.com", "editor", "cubes", "[]", 1),
-                ("u3", "Rawad Khallad", "rawad.khallad", "rawad.khallad@cubesplatform.com", "editor", "cubes", "[]", 1),
-                ("u4", "Mohammad Younes", "mohammad.younes", "mohammad.younes@cubesplatform.com", "viewer", "all", "[]", 1),
-                ("u5", "Dima Hamodi", "dima.hamodi", "dima.hamodi@tsmesolutions.com", "viewer", "imp", "[]", 1)
+                ("u1","Mohammad Hamzeh","mohammad.hamzeh","mohammad.hamzeh@cubesplatform.com",
+                 "admin","all","[]",1, _h("W3T1ES#AvZqV"),"W3T1ES#AvZqV","[]","edit","[]"),
+                ("u2","Anas Abdelhadi","anas.abdelhadi","anas.abdelhadi@cubesplatform.com",
+                 "editor","cubes","[]",1, _h("L5fJ00qfXOWM"),"L5fJ00qfXOWM","[]","view","[]"),
+                ("u3","Rawad Khallad","rawad.khallad","rawad.khallad@cubesplatform.com",
+                 "editor","cubes","[]",1, _h("DyOSabt0D#rm"),"DyOSabt0D#rm","[]","view","[]"),
+                ("u4","Mohammad Younes","mohammad.younes","mohammad.younes@cubesplatform.com",
+                 "viewer","all","[]",1, _h("LORS7e71sC$J"),"LORS7e71sC$J","[]","view",'["c2026"]'),
+                ("u5","Dima Hamodi","dima.hamodi","dima.hamodi@tsmesolutions.com",
+                 "viewer","imp","[]",1, _h("USc2y1ovWQkM"),"USc2y1ovWQkM","[]","view","[]"),
             ]
-            for du in default_users:
-                conn.execute("INSERT INTO users VALUES (?,?,?,?,?,?,?,?)", du)
+            conn.executemany(
+                "INSERT INTO users (id,name,username,email,role,project_filter,allowed_projects,"
+                "active,password_hash,plain_password,allowed_products,c2026_access,allowed_modules) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                default_users
+            )
 
 
 def _migrate_users(conn: sqlite3.Connection) -> None:
