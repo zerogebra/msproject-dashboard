@@ -1,0 +1,9 @@
+﻿fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+python-multipart
+
+# local only (requires Java JRE) â€” do NOT enable on Render
+# jpype1
+# mpxj

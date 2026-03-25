@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,7 +34,7 @@ jre.zip
 debug_*.py
 qc_check.py
 *.txt
-!README.txt
+!requirements.txt
 audit_log.txt
 conversation_log.txt
 
