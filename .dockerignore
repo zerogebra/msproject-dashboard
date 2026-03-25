@@ -3,9 +3,7 @@
 .env
 __pycache__/
 *.mpp
-*.db
 /libs/
 /mpp/
-/data/
 /jre/
 jre.zip
