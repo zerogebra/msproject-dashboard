@@ -150,7 +150,13 @@ def portfolio(username: str = "user"):
         for p in all_projects:
             name = p["name"]
             code = p["code"]
-            
+
+            # Skip lightweight (extension) projects that are flagged off from main page
+            is_lw = bool(p["is_lightweight"]) if "is_lightweight" in p.keys() else False
+            show_on_main = p["show_on_main"] if "show_on_main" in p.keys() else 1
+            if is_lw and not show_on_main:
+                continue
+
             # Skip projects the user is not allowed to see
             if requesting_user and not can_access_project(requesting_user, name):
                 continue
@@ -858,6 +864,10 @@ def get_project_extension():
             ).fetchall()
             d = dict(p)
             d["products"] = [{"id": r["id"], "name": r["name"]} for r in prod_rows]
+            d["cr_id"]       = p["cr_id"]       if "cr_id"       in p.keys() else ""
+            d["cr_status"]   = p["cr_status"]   if "cr_status"   in p.keys() else ""
+            d["stage"]       = p["stage"]       if "stage"       in p.keys() else ""
+            d["show_on_main"] = bool(p["show_on_main"]) if "show_on_main" in p.keys() else True
             result.append(d)
     return {"projects": result}
 
@@ -869,17 +879,26 @@ class LightweightProjectCreate(BaseModel):
     progress: float = 0.0
     team_type: str = "cubes"
     client: Optional[str] = None
+    cr_id: Optional[str] = None
+    cr_status: Optional[str] = None
+    stage: Optional[str] = None
+    show_on_main: bool = True
 
 @app.post("/api/project-extension")
 def create_lightweight_project(req: LightweightProjectCreate, caller_id: str):
     _require_admin(caller_id)
     from app.database import get_conn
-    code = req.name[:4].upper() + str(uuid.uuid4())[:4].upper()
+    code = (req.cr_id or req.name)[:6].upper().replace("#","").replace("-","") + str(uuid.uuid4())[:4].upper()
     now_iso = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO projects (code, name, mpp_path, health, progress, start_date, end_date, created_at, team_type, is_lightweight, client) VALUES (?,?,?,?,?,?,?,?,?,1,?)",
-            (code, req.name.strip(), "", "G", req.progress, req.start_date or now_iso, req.end_date or now_iso, now_iso, req.team_type, req.client or "")
+            "INSERT INTO projects (code, name, mpp_path, health, progress, start_date, end_date, "
+            "created_at, team_type, is_lightweight, client, cr_id, cr_status, stage, show_on_main) "
+            "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
+            (code, req.name.strip(), "", "G", req.progress,
+             req.start_date or now_iso, req.end_date or None, now_iso,
+             req.team_type, req.client or "", req.cr_id or "",
+             req.cr_status or "", req.stage or "", 1 if req.show_on_main else 0)
         )
     return {"status": "ok", "code": code}
 
@@ -892,6 +911,10 @@ class LightweightProjectUpdate(BaseModel):
     team_type: Optional[str] = None
     client: Optional[str] = None
     stakeholder: Optional[str] = None
+    cr_id: Optional[str] = None
+    cr_status: Optional[str] = None
+    stage: Optional[str] = None
+    show_on_main: Optional[bool] = None
 
 @app.put("/api/project-extension/{code}")
 def update_lightweight_project(code: str, req: LightweightProjectUpdate, caller_id: str):
@@ -908,11 +931,69 @@ def update_lightweight_project(code: str, req: LightweightProjectUpdate, caller_
         team_type   = req.team_type       if req.team_type   is not None else p["team_type"]
         client      = req.client          if req.client      is not None else (p["client"] or "")
         stakeholder = req.stakeholder     if req.stakeholder is not None else (p["stakeholder"] if "stakeholder" in p.keys() else "")
+        cr_id       = req.cr_id           if req.cr_id       is not None else (p["cr_id"]     if "cr_id"     in p.keys() else "")
+        cr_status   = req.cr_status       if req.cr_status   is not None else (p["cr_status"] if "cr_status" in p.keys() else "")
+        stage       = req.stage           if req.stage       is not None else (p["stage"]     if "stage"     in p.keys() else "")
+        show_on_main = (1 if req.show_on_main else 0) if req.show_on_main is not None else (p["show_on_main"] if "show_on_main" in p.keys() else 1)
         health = "G" if progress >= 100 else ("A" if progress >= 50 else "R")
         conn.execute(
-            "UPDATE projects SET name=?, start_date=?, end_date=?, progress=?, team_type=?, health=?, client=?, stakeholder=? WHERE code=?",
-            (name, start_date, end_date, progress, team_type, health, client, stakeholder, code)
+            "UPDATE projects SET name=?, start_date=?, end_date=?, progress=?, team_type=?, "
+            "health=?, client=?, stakeholder=?, cr_id=?, cr_status=?, stage=?, show_on_main=? WHERE code=?",
+            (name, start_date, end_date, progress, team_type, health, client, stakeholder,
+             cr_id, cr_status, stage, show_on_main, code)
         )
+    return {"status": "ok"}
+
+
+# ── RESOURCE SUMMARY ──────────────────────────────────────────────────────────
+
+@app.get("/api/resource-summary")
+def get_resource_summary():
+    from app.database import get_conn
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM resource_summary ORDER BY sort_order, section, project").fetchall()
+    return {"rows": [dict(r) for r in rows]}
+
+
+class ResourceSummaryRow(BaseModel):
+    section: str
+    project: str = ""
+    sub_project: str = ""
+    resource_name: str = ""
+    utilization_pct: int = 0
+    remarks: str = ""
+    sort_order: int = 0
+
+@app.post("/api/resource-summary")
+def create_resource_summary_row(req: ResourceSummaryRow, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    row_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        max_order = conn.execute("SELECT MAX(sort_order) FROM resource_summary WHERE section=?", (req.section,)).fetchone()[0] or 0
+        conn.execute(
+            "INSERT INTO resource_summary (id,section,project,sub_project,resource_name,utilization_pct,remarks,sort_order) VALUES (?,?,?,?,?,?,?,?)",
+            (row_id, req.section, req.project, req.sub_project, req.resource_name, req.utilization_pct, req.remarks, max_order + 1)
+        )
+    return {"status": "ok", "id": row_id}
+
+@app.put("/api/resource-summary/{row_id}")
+def update_resource_summary_row(row_id: str, req: ResourceSummaryRow, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE resource_summary SET section=?,project=?,sub_project=?,resource_name=?,utilization_pct=?,remarks=? WHERE id=?",
+            (req.section, req.project, req.sub_project, req.resource_name, req.utilization_pct, req.remarks, row_id)
+        )
+    return {"status": "ok"}
+
+@app.delete("/api/resource-summary/{row_id}")
+def delete_resource_summary_row(row_id: str, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        conn.execute("DELETE FROM resource_summary WHERE id=?", (row_id,))
     return {"status": "ok"}
 
 

@@ -299,6 +299,48 @@ def _seed_c2026(conn):
     conn.execute("INSERT INTO c2026_plan (id, data) VALUES ('main', ?)", (json.dumps(default_plan),))
 
 
+# ── extension projects seed ──────────────────────────────────────
+
+def _seed_ext_projects(conn):
+    """Seed the 8 initial CR/extension projects if they don't exist yet."""
+    ext_projects = [
+        # (cr_id, name, client, start_date, progress, products_names, stage)
+        ("CR#1-ICP",    "CR#1-ICP",    "ICP",    "2025-11-09", 1.0,  ["EW","ICG-EW","Leadership Dashboard","Data Management"], "Ready For Dev"),
+        ("CR#2-DMT",    "CR#2-DMT",    "DMT",    "2026-01-07", 0.0,  ["Initiatives","Data Management"],                        "Ready For Dev"),
+        ("CR#1-AZZ",    "CR#1-AZZ",    "AAZ",    "2026-01-28", 0.0,  ["Risk Dashboard"],                                       "Ready For Dev"),
+        ("CR#1-DMT",    "CR#1-DMT-2",  "DMT",    "2026-02-09", 0.0,  ["Initiatives"],                                          "In BA"),
+        ("CR#2-DDOF",   "CR#2-DDOF",   "DDOF",   "2026-01-28", 0.0,  ["Cubes Classic"],                                        "In BA"),
+        ("CR#2-ICP",    "CR#2-ICP",    "ICP",    "2026-01-12", 0.0,  ["ICG-EW"],                                               "New"),
+        ("CR#3-ADAFSA", "CR#3-ADAFSA", "ADAFSA", "2026-02-01", 0.0,  ["Common Dashboard","Cubes Classic"],                     "Under Development"),
+        ("CR#3-DOF",    "CR#3-DOF",    "DOF",    "2026-02-09", 0.0,  ["Leadership Dashboard","Common Dashboard","Cubes Classic"], "New"),
+    ]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for cr_id, name, client, start_date, progress, product_names, stage in ext_projects:
+        existing = conn.execute("SELECT code FROM projects WHERE cr_id=?", (cr_id,)).fetchone()
+        if existing:
+            continue
+        code = cr_id.replace("#", "").replace("-", "")[:8].upper() + "EXT"
+        health = "G" if progress >= 100 else ("A" if progress >= 50 else "R")
+        conn.execute(
+            "INSERT INTO projects (code, name, mpp_path, health, progress, start_date, end_date, "
+            "created_at, team_type, is_lightweight, client, cr_id, stage, show_on_main) "
+            "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,1)",
+            (code, name, "", health, progress, start_date, None, now_iso,
+             "cubes", client, cr_id, stage)
+        )
+        # Link products
+        for pname in product_names:
+            prod = conn.execute("SELECT id FROM products WHERE name=?", (pname,)).fetchone()
+            if prod:
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO project_products (project_code, product_id) VALUES (?,?)",
+                        (code, prod["id"])
+                    )
+                except Exception:
+                    pass
+
+
 # ── init & migration ─────────────────────────────────────────────
 
 def init_db() -> None:
@@ -506,6 +548,66 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN plain_password TEXT")
         except Exception:
             pass
+
+        # schema v2.8 — project extension extra fields
+        for stmt in [
+            "ALTER TABLE projects ADD COLUMN cr_id TEXT",
+            "ALTER TABLE projects ADD COLUMN cr_status TEXT",
+            "ALTER TABLE projects ADD COLUMN stage TEXT",
+            "ALTER TABLE projects ADD COLUMN show_on_main INTEGER NOT NULL DEFAULT 1",
+        ]:
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
+
+        # schema v2.8 — resource summary table
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS resource_summary (
+                    id           TEXT PRIMARY KEY,
+                    section      TEXT NOT NULL,
+                    project      TEXT NOT NULL DEFAULT '',
+                    sub_project  TEXT NOT NULL DEFAULT '',
+                    resource_name TEXT NOT NULL DEFAULT '',
+                    utilization_pct INTEGER NOT NULL DEFAULT 0,
+                    remarks      TEXT NOT NULL DEFAULT '',
+                    sort_order   INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+        except Exception:
+            pass
+
+        # Seed resource summary if empty
+        rs_count = conn.execute("SELECT COUNT(*) FROM resource_summary").fetchone()[0]
+        if rs_count == 0:
+            rs_rows = [
+                # section, project, sub_project, resource_name, utilization_pct, remarks, sort_order
+                ("BE", "ICP", "",                        "Tameem",              100, "ICP priority",                  1),
+                ("BE", "ICP", "",                        "Sohaib",              100, "ICP priority",                  2),
+                ("BE", "ICP", "",                        "BE Resource – TBD",   100, "ICP priority",                  3),
+                ("BE", "Audit", "—",                     "—",                     0, "Blocked due to ICP priority",  4),
+                ("QC", "ICP", "ICPAula – initiatives",   "Aula",                100, "",                              5),
+                ("QC", "APQC", "—",                      "Abdullah Mustafa",    100, "",                              6),
+                ("QC", "ICP", "Testing leadership (dashboard)", "Ahmed Fikiri", 100, "",                              7),
+                ("QC", "ICP", "Data management",         "Duha",                100, "",                              8),
+                ("FE", "ICP", "",                        "FE Resource – TBD",   100, "ICP",                           9),
+                ("FE", "ICP", "",                        "FE Resource – TBD",   100, "ICP",                          10),
+                ("FE", "ICP", "",                        "FE Resource – TBD",   100, "ICP",                          11),
+                ("FE", "EF",  "—",                       "Jaradat",              90, "Active",                       12),
+                ("FE", "EF",  "—",                       "Jamal",                90, "Active",                       13),
+                ("FE", "APQC","—",                       "Loiy",                100, "Active",                       14),
+                ("FE", "APQC","—",                       "Jaradat",              10, "Support",                      15),
+                ("FE", "EW Board","—",                   "Anas Al Khamis",      100, "Main owner",                   16),
+                ("FE", "EW Board","—",                   "Jamal",                10, "Support",                      17),
+            ]
+            conn.executemany(
+                "INSERT INTO resource_summary (id,section,project,sub_project,resource_name,utilization_pct,remarks,sort_order) VALUES (?,?,?,?,?,?,?,?)",
+                [(str(uuid.uuid4()),) + r for r in rs_rows]
+            )
+
+        # Seed 8 extension (lightweight) projects if not already present
+        _seed_ext_projects(conn)
 
         # schema v1.8 — named resources table
         # (resources table is created via _SCHEMA above; just ensure it exists via executescript)
