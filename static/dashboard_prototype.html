@@ -6768,6 +6768,398 @@
     }
 
     // ── RESOURCE HUB MODAL ───────────────────────────────────────────
+    // ── RESOURCE HUB v2 (new design for comparison) ──────────────────────────
+    function ResourceHub1({ user, onClose }) {
+      const [tab, setTab] = useState('overview');
+      const [hubData, setHubData] = useState(null);
+      const [summaryRows, setSummaryRows] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [matrixView, setMatrixView] = useState('detailed');
+
+      const ROLES1 = ['BA', 'UIUX', 'BE', 'FE', 'QC', 'PM'];
+      const ROLE_LABELS1 = { BA: 'BA', UIUX: 'UI/UX', BE: 'BE', FE: 'FE', QC: 'QC', PM: 'PM' };
+      const ROLE_COLORS1 = { BA: '#6366f1', UIUX: '#8b5cf6', BE: '#0ea5e9', FE: '#22c55e', QC: '#f97316', PM: '#ef4444' };
+      const ROLE_BG1     = { BA: 'rgba(99,102,241,.08)', UIUX: 'rgba(139,92,246,.08)', BE: 'rgba(14,165,233,.08)', FE: 'rgba(34,197,94,.08)', QC: 'rgba(249,115,22,.08)', PM: 'rgba(239,68,68,.08)' };
+      const isAdmin1 = user?.role === 'admin';
+      const canEdit1 = user?.role === 'admin' || user?.role === 'editor';
+
+      async function reload() {
+        setLoading(true);
+        try {
+          const [hub, summ] = await Promise.all([api.getResourceHub(), api.getResourceSummary()]);
+          setHubData(hub);
+          setSummaryRows(summ.rows || []);
+        } catch (e) { console.error(e); }
+        setLoading(false);
+      }
+
+      useEffect(() => { reload(); }, []);
+
+      // ── Allocation tab state (Table 1 style) ──
+      const [editingId, setEditingId] = useState(null);
+      const [editBuf, setEditBuf] = useState({});
+      const [addingRow, setAddingRow] = useState(false);
+      const [newRow, setNewRow] = useState({ section: 'FE', project: '', sub_project: '', resource_name: '', utilization_pct: 100, remarks: '' });
+      const [saving, setSaving] = useState(false);
+
+      async function saveEdit(id) {
+        setSaving(true);
+        try { await api.updateResourceSummaryRow(user.id, id, editBuf); await reload(); setEditingId(null); }
+        catch (e) { alert(e.message); }
+        setSaving(false);
+      }
+
+      async function deleteRow(id) {
+        if (!confirm('Delete this row?')) return;
+        try { await api.deleteResourceSummaryRow(user.id, id); await reload(); }
+        catch (e) { alert(e.message); }
+      }
+
+      async function saveNewRow() {
+        if (!newRow.resource_name.trim()) return alert('Resource name is required');
+        setSaving(true);
+        try { await api.createResourceSummaryRow(user.id, newRow); await reload(); setAddingRow(false); setNewRow({ section: 'FE', project: '', sub_project: '', resource_name: '', utilization_pct: 100, remarks: '' }); }
+        catch (e) { alert(e.message); }
+        setSaving(false);
+      }
+
+      // ── Derive Overview summary from summaryRows ──
+      // Build: project → role → sumPct, then pick the first resource's utilization per role per project
+      const overviewProjects = [...new Set(summaryRows.map(r => r.project))].filter(Boolean);
+      const overviewRoles    = [...new Set(summaryRows.map(r => r.section))].filter(r => ROLES1.includes(r));
+      // projRolePct[project][role] = max pct across resources in that role for that project
+      const projRolePct = {};
+      summaryRows.forEach(r => {
+        if (!projRolePct[r.project]) projRolePct[r.project] = {};
+        const cur = projRolePct[r.project][r.section] || 0;
+        projRolePct[r.project][r.section] = Math.max(cur, r.utilization_pct || 0);
+      });
+
+      // ── Matrix from hubData (same as existing but read-only here) ──
+      const cubesProj1 = hubData ? hubData.projects.filter(p => p.team_type === 'cubes') : [];
+      const pool1      = hubData ? Object.fromEntries(hubData.pool.map(r => [r.role, r])) : {};
+      const utilC1     = hubData?.util_cubes || {};
+
+      const resMap1 = {}, projResMap1 = {};
+      cubesProj1.forEach(p => {
+        projResMap1[p.code] = {};
+        (p.named_allocations || []).forEach(na => {
+          projResMap1[p.code][na.resource_id] = na.allocation_pct;
+          if (!resMap1[na.resource_id]) resMap1[na.resource_id] = { name: na.name, role: na.role, totPct: 0 };
+          resMap1[na.resource_id].totPct = (resMap1[na.resource_id].totPct || 0) + (na.allocation_pct || 0);
+        });
+      });
+      const resByRole1 = {};
+      ROLES1.forEach(role => { resByRole1[role] = Object.entries(resMap1).filter(([, v]) => v.role === role).map(([id, v]) => ({ id, ...v })); });
+      const activeRoles1 = ROLES1.filter(r => resByRole1[r].length > 0);
+
+      const miniBar1 = (pct) => {
+        if (!pct) return <span style={{ color: 'var(--border)' }}>—</span>;
+        const over = pct > 100, full = pct === 100;
+        const color = over ? '#ef4444' : full ? '#f97316' : '#22c55e';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 100 }}>
+            <div style={{ flex: 1, height: 7, borderRadius: 3, background: 'var(--s2)', overflow: 'visible', position: 'relative', minWidth: 50 }}>
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(pct,100)}%`, background: color, borderRadius: 3 }} />
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, color, minWidth: 34 }}>{pct}%{over ? '🔴' : full ? '🟡' : ''}</span>
+          </div>
+        );
+      };
+
+      const totalBadge1 = (pct) => {
+        if (!pct) return <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>;
+        const over = pct > 100, full = pct === 100;
+        return <span style={{ fontSize: 11, fontWeight: 800, color: over ? '#ef4444' : full ? '#f97316' : '#22c55e' }}>{pct}%{over ? '🔴' : full ? '🟡' : '🟢'}</span>;
+      };
+
+      const inputStyle = { fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', width: '100%' };
+
+      return (
+        <div className="res-hub-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+          <div className="res-hub-panel">
+            <div className="res-hub-hdr">
+              <span style={{ fontSize: 22 }}>🗂</span>
+              <h3>Resource Hub <span style={{ fontSize: 11, fontWeight: 400, color: '#10b981', marginLeft: 6 }}>v2 — New Design</span></h3>
+              <button className="res-hub-hdr-close" onClick={onClose}>✕</button>
+            </div>
+
+            <div className="res-hub-body">
+              <div className="rh-tabs">
+                {[['overview', '📊 Overview'], ['allocation', '📋 Allocation (Table 1)'], ['matrix', '🗂 Matrix']].map(([id, lbl]) => (
+                  <button key={id} className={`rh-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{lbl}</button>
+                ))}
+              </div>
+
+              {loading && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', fontSize: 13 }}>Loading…</div>}
+
+              {/* ── OVERVIEW TAB ── (all roles visible) */}
+              {!loading && tab === 'overview' && (
+                <div>
+                  {overviewProjects.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: 13 }}>
+                      No data yet. Add rows in the <strong>Allocation</strong> tab.
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: '100%' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--s2)' }}>
+                            <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11, color: 'var(--muted)', borderBottom: '2px solid var(--border)', minWidth: 160 }}>Project</th>
+                            {overviewRoles.map(role => (
+                              <th key={role} style={{ padding: '9px 14px', textAlign: 'center', fontWeight: 800, fontSize: 11, color: ROLE_COLORS1[role], borderBottom: '2px solid var(--border)', borderLeft: '1px solid var(--border)', minWidth: 130, background: ROLE_BG1[role] }}>
+                                {ROLE_LABELS1[role]} Utiliz.
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {overviewProjects.map((proj, pi) => (
+                            <tr key={proj} style={{ borderBottom: '1px solid var(--border)', background: pi % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.015)' }}>
+                              <td style={{ padding: '9px 14px', fontWeight: 600, fontSize: 12 }}>{proj}</td>
+                              {overviewRoles.map(role => (
+                                <td key={role} style={{ padding: '7px 14px', borderLeft: '1px solid var(--border)' }}>
+                                  {miniBar1(projRolePct[proj]?.[role] || 0)}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── ALLOCATION TAB — Table 1 style ── */}
+              {!loading && tab === 'allocation' && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      {canEdit1 ? 'Click a row to edit. Use + Add Row to add new entries.' : 'Read-only view.'}
+                    </div>
+                    {canEdit1 && (
+                      <button onClick={() => setAddingRow(true)} style={{ fontSize: 11, padding: '5px 14px', borderRadius: 6, border: '1px solid var(--brand)', background: 'rgba(99,102,241,.1)', color: 'var(--brand)', fontWeight: 700, cursor: 'pointer' }}>
+                        + Add Row
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: '100%' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--s2)' }}>
+                          {['Section', 'Project', 'Sub-Project / Notes', 'Resource', 'Utilization %', 'Remarks', canEdit1 ? '' : null].filter(Boolean).map((h, i) => (
+                            <th key={i} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, fontSize: 11, color: 'var(--muted)', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* Group rows by section */}
+                        {(() => {
+                          const sections = [...new Set(summaryRows.map(r => r.section))];
+                          const rows = [];
+                          sections.forEach(sec => {
+                            const secRows = summaryRows.filter(r => r.section === sec);
+                            secRows.forEach((row, ri) => {
+                              const isEditing = editingId === row.id;
+                              const pct = row.utilization_pct || 0;
+                              const pctColor = pct > 100 ? '#ef4444' : pct === 100 ? '#f97316' : '#22c55e';
+                              rows.push(
+                                <tr key={row.id} style={{ borderBottom: '1px solid var(--border)', background: ri % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.015)', cursor: canEdit1 && !isEditing ? 'pointer' : 'default' }}
+                                  onClick={() => { if (canEdit1 && !isEditing && editingId === null) { setEditingId(row.id); setEditBuf({ section: row.section, project: row.project, sub_project: row.sub_project, resource_name: row.resource_name, utilization_pct: row.utilization_pct, remarks: row.remarks }); } }}>
+                                  {/* Section cell — show label only for first row in group */}
+                                  <td style={{ padding: '7px 12px', fontWeight: 800, fontSize: 11, color: ROLE_COLORS1[sec] || 'var(--brand)', verticalAlign: 'middle', whiteSpace: 'nowrap', borderRight: '2px solid var(--border)', background: ROLE_BG1[sec] || 'transparent' }}>
+                                    {ri === 0 ? <span style={{ padding: '2px 8px', borderRadius: 6, background: ROLE_BG1[sec], border: `1px solid ${ROLE_COLORS1[sec] || 'var(--border)'}`, fontSize: 11, fontWeight: 800 }}>{sec}</span> : ''}
+                                  </td>
+                                  {isEditing ? (
+                                    <>
+                                      <td style={{ padding: '4px 8px' }}><input style={inputStyle} value={editBuf.project} onChange={e => setEditBuf(b => ({...b, project: e.target.value}))} /></td>
+                                      <td style={{ padding: '4px 8px' }}><input style={inputStyle} value={editBuf.sub_project} onChange={e => setEditBuf(b => ({...b, sub_project: e.target.value}))} /></td>
+                                      <td style={{ padding: '4px 8px' }}><input style={inputStyle} value={editBuf.resource_name} onChange={e => setEditBuf(b => ({...b, resource_name: e.target.value}))} /></td>
+                                      <td style={{ padding: '4px 8px' }}>
+                                        <input type="number" min="0" max="200" style={{...inputStyle, width: 60}} value={editBuf.utilization_pct} onChange={e => setEditBuf(b => ({...b, utilization_pct: Number(e.target.value)}))} />
+                                      </td>
+                                      <td style={{ padding: '4px 8px' }}><input style={inputStyle} value={editBuf.remarks} onChange={e => setEditBuf(b => ({...b, remarks: e.target.value}))} /></td>
+                                      <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                                        <button onClick={() => saveEdit(row.id)} disabled={saving} style={{ marginRight: 4, fontSize: 11, padding: '3px 10px', borderRadius: 5, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>Save</button>
+                                        <button onClick={() => setEditingId(null)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--muted)', cursor: 'pointer' }}>Cancel</button>
+                                      </td>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <td style={{ padding: '7px 12px', fontWeight: 500 }}>{row.project || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                                      <td style={{ padding: '7px 12px', color: 'var(--muted)', fontSize: 11 }}>{row.sub_project || '—'}</td>
+                                      <td style={{ padding: '7px 12px', fontWeight: 600 }}>{row.resource_name || <span style={{ color: 'var(--muted)' }}>TBD</span>}</td>
+                                      <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                                        <span style={{ fontWeight: 800, color: pctColor, fontSize: 13 }}>{pct}%</span>
+                                      </td>
+                                      <td style={{ padding: '7px 12px', color: 'var(--muted)', fontSize: 11 }}>{row.remarks || '—'}</td>
+                                      {canEdit1 && (
+                                        <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                                          <button onClick={e => { e.stopPropagation(); deleteRow(row.id); }} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, border: '1px solid rgba(239,68,68,.3)', background: 'rgba(239,68,68,.07)', color: '#ef4444', cursor: 'pointer' }}>✕</button>
+                                        </td>
+                                      )}
+                                    </>
+                                  )}
+                                </tr>
+                              );
+                            });
+                          });
+                          return rows;
+                        })()}
+
+                        {/* Add new row form */}
+                        {addingRow && (
+                          <tr style={{ background: 'rgba(99,102,241,.04)', borderTop: '2px solid var(--brand)' }}>
+                            <td style={{ padding: '6px 8px' }}>
+                              <select style={inputStyle} value={newRow.section} onChange={e => setNewRow(r => ({...r, section: e.target.value}))}>
+                                {ROLES1.map(r => <option key={r} value={r}>{r}</option>)}
+                              </select>
+                            </td>
+                            <td style={{ padding: '6px 8px' }}><input style={inputStyle} placeholder="Project…" value={newRow.project} onChange={e => setNewRow(r => ({...r, project: e.target.value}))} /></td>
+                            <td style={{ padding: '6px 8px' }}><input style={inputStyle} placeholder="Notes…" value={newRow.sub_project} onChange={e => setNewRow(r => ({...r, sub_project: e.target.value}))} /></td>
+                            <td style={{ padding: '6px 8px' }}><input style={inputStyle} placeholder="Name…" value={newRow.resource_name} onChange={e => setNewRow(r => ({...r, resource_name: e.target.value}))} /></td>
+                            <td style={{ padding: '6px 8px' }}><input type="number" min="0" max="200" style={{...inputStyle, width: 60}} value={newRow.utilization_pct} onChange={e => setNewRow(r => ({...r, utilization_pct: Number(e.target.value)}))} /></td>
+                            <td style={{ padding: '6px 8px' }}><input style={inputStyle} placeholder="Remarks…" value={newRow.remarks} onChange={e => setNewRow(r => ({...r, remarks: e.target.value}))} /></td>
+                            <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                              <button onClick={saveNewRow} disabled={saving} style={{ marginRight: 4, fontSize: 11, padding: '4px 12px', borderRadius: 5, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>Add</button>
+                              <button onClick={() => setAddingRow(false)} style={{ fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--muted)', cursor: 'pointer' }}>Cancel</button>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── MATRIX TAB (read-only detailed cross-matrix from named allocations) ── */}
+              {!loading && tab === 'matrix' && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.07em' }}>
+                      Resource × Project (from named allocations)
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[['detailed', '👤 Detailed'], ['summary', '📊 Summary']].map(([v, lbl]) => (
+                        <button key={v} onClick={() => setMatrixView(v)}
+                          style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, border: `1.5px solid ${matrixView === v ? 'var(--brand)' : 'var(--border)'}`, background: matrixView === v ? 'rgba(99,102,241,.1)' : 'var(--s2)', color: matrixView === v ? 'var(--brand)' : 'var(--text)', fontWeight: matrixView === v ? 700 : 400, cursor: 'pointer' }}>
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {activeRoles1.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: 13 }}>
+                      No named assignments yet. Use the <strong>old Resources</strong> button → Allocation tab → Assign to add people to projects.
+                    </div>
+                  ) : matrixView === 'detailed' ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: '100%' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--s2)' }}>
+                            <th style={{ padding: '8px 14px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', borderBottom: '1px solid var(--border)', position: 'sticky', left: 0, background: 'var(--s2)', zIndex: 2 }}>Project</th>
+                            {activeRoles1.map(role => (
+                              <th key={role} colSpan={resByRole1[role].length} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 800, fontSize: 10, color: ROLE_COLORS1[role], borderBottom: '1px solid var(--border)', borderLeft: '2px solid var(--border)', textTransform: 'uppercase', background: ROLE_BG1[role] }}>
+                                {ROLE_LABELS1[role]}
+                              </th>
+                            ))}
+                          </tr>
+                          <tr style={{ background: 'var(--s1)' }}>
+                            <th style={{ padding: '6px 14px', borderBottom: '2px solid var(--border)', position: 'sticky', left: 0, background: 'var(--s1)', zIndex: 2 }}></th>
+                            {activeRoles1.map(role => resByRole1[role].map((res, ri) => (
+                              <th key={res.id} style={{ padding: '6px 8px', textAlign: 'center', fontSize: 10, borderBottom: '2px solid var(--border)', borderLeft: ri === 0 ? '2px solid var(--border)' : '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                                {res.name.split(' ')[0]}
+                              </th>
+                            )))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cubesProj1.map((p, pi) => (
+                            <tr key={p.code} style={{ borderBottom: '1px solid var(--border)', background: pi % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.015)' }}>
+                              <td style={{ padding: '7px 14px', fontWeight: 600, fontSize: 12, position: 'sticky', left: 0, background: pi % 2 === 0 ? 'var(--s1)' : 'var(--s2)', zIndex: 1, borderRight: '1px solid var(--border)' }}>{p.name}</td>
+                              {activeRoles1.map(role => resByRole1[role].map((res, ri) => {
+                                const pct = projResMap1[p.code]?.[res.id] || 0;
+                                const over = pct > 100, full = pct === 100;
+                                return (
+                                  <td key={res.id} style={{ padding: '7px 8px', textAlign: 'center', borderLeft: ri === 0 ? '2px solid var(--border)' : '1px solid var(--border)' }}>
+                                    {pct ? <span style={{ fontWeight: 700, fontSize: 11, color: over ? '#ef4444' : full ? '#f97316' : '#22c55e' }}>{pct}%</span> : <span style={{ color: 'var(--border)' }}>—</span>}
+                                  </td>
+                                );
+                              }))}
+                            </tr>
+                          ))}
+                          <tr style={{ background: 'var(--s2)', borderTop: '2px solid var(--border)' }}>
+                            <td style={{ padding: '8px 14px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', position: 'sticky', left: 0, background: 'var(--s2)', zIndex: 1, borderRight: '1px solid var(--border)' }}>TOTAL</td>
+                            {activeRoles1.map(role => resByRole1[role].map((res, ri) => (
+                              <td key={res.id} style={{ padding: '8px 8px', textAlign: 'center', borderLeft: ri === 0 ? '2px solid var(--border)' : '1px solid var(--border)' }}>
+                                {totalBadge1(res.totPct)}
+                              </td>
+                            )))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: '100%' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--s2)' }}>
+                            <th style={{ padding: '8px 14px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', borderBottom: '2px solid var(--border)', position: 'sticky', left: 0, background: 'var(--s2)', zIndex: 2 }}>Project</th>
+                            {activeRoles1.map(role => (
+                              <th key={role} style={{ padding: '8px 14px', textAlign: 'center', fontWeight: 800, fontSize: 11, color: ROLE_COLORS1[role], borderBottom: '2px solid var(--border)', borderLeft: '1px solid var(--border)', minWidth: 120, background: ROLE_BG1[role] }}>
+                                {ROLE_LABELS1[role]} Utiliz.
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cubesProj1.map((p, pi) => {
+                            const rolePct = {};
+                            activeRoles1.forEach(role => {
+                              rolePct[role] = resByRole1[role].reduce((acc, res) => acc + (projResMap1[p.code]?.[res.id] || 0), 0);
+                            });
+                            return (
+                              <tr key={p.code} style={{ borderBottom: '1px solid var(--border)', background: pi % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.015)' }}>
+                                <td style={{ padding: '9px 14px', fontWeight: 600, position: 'sticky', left: 0, background: pi % 2 === 0 ? 'var(--s1)' : 'var(--s2)', zIndex: 1, borderRight: '1px solid var(--border)' }}>{p.name}</td>
+                                {activeRoles1.map(role => (
+                                  <td key={role} style={{ padding: '7px 12px', borderLeft: '1px solid var(--border)' }}>
+                                    {miniBar1(rolePct[role] || 0)}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                          <tr style={{ background: 'var(--s2)', borderTop: '2px solid var(--border)' }}>
+                            <td style={{ padding: '8px 14px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', position: 'sticky', left: 0, background: 'var(--s2)', zIndex: 1, borderRight: '1px solid var(--border)' }}>TOTAL DEMAND</td>
+                            {activeRoles1.map(role => {
+                              const total = pool1[role]?.total_count || 0;
+                              const demand = utilC1[role] || 0;
+                              const over = demand > total, full = demand === total;
+                              return (
+                                <td key={role} style={{ padding: '8px 12px', borderLeft: '1px solid var(--border)', textAlign: 'center' }}>
+                                  <span style={{ fontSize: 12, fontWeight: 800, color: over ? '#ef4444' : full ? '#f97316' : '#22c55e' }}>
+                                    {demand}/{total} {over ? '🔴' : full ? '🟡' : '🟢'}
+                                  </span>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // ── END ResourceHub1 ──────────────────────────────────────────────────────
+
     function ResourceHub({ user, onClose }) {
       const [tab, setTab] = useState(user?.role === 'admin' ? 'overview' : 'allocation');
       const [data, setData] = useState(null);
@@ -9168,6 +9560,7 @@
       const [pendingCR, setPendingCR] = useState(0);
       const [showWizard, setShowWizard] = useState(false);
       const [showResHub, setShowResHub] = useState(false);
+      const [showResHub1, setShowResHub1] = useState(false);
       const [showProjExt, setShowProjExt] = useState(false);
       const [showC2026, setShowC2026] = useState(false);
       const [dashSettings, setDashSettings] = useState(DEFAULT_SETTINGS);
@@ -9362,6 +9755,12 @@
                   📊 Resources
                 </button>
               )}
+              {canSee('resources') && (
+                <button className="admin-btn" style={{ background: 'linear-gradient(135deg,rgba(16,185,129,.15),rgba(5,150,105,.1))', borderColor: 'rgba(16,185,129,.4)', color: '#10b981' }}
+                  onClick={() => setShowResHub1(true)} title="Open Resource Hub v2 (new design)">
+                  🗂 Resource Hub1
+                </button>
+              )}
               {user.role === 'admin' && (
                 <div style={{ position: 'relative' }}>
                   <button className="admin-btn" onClick={() => setShowDbViewer(true)} style={{ background: 'linear-gradient(135deg,rgba(107,114,128,.12),rgba(75,85,99,.08))', borderColor: 'rgba(107,114,128,.3)', color: 'var(--muted)' }} title="View Database">🗄 DB</button>
@@ -9422,6 +9821,7 @@
           {showAdmin && <AdminPanel currentUser={user} onClose={() => { setShowAdmin(false); setPendingCR(0); api.pendingCRCount().then(r => setPendingCR(r.pending_count)).catch(() => { }); }} onToast={showToast} initialTab={adminTab} />}
           {showWizard && <CreateProjectWizard user={user} onClose={() => setShowWizard(false)} onCreated={() => { showToast('Project created successfully!', 'success'); loadProjects(user); }} />}
           {showResHub && <ResourceHub user={user} onClose={() => setShowResHub(false)} />}
+          {showResHub1 && <ResourceHub1 user={user} onClose={() => setShowResHub1(false)} />}
           {showProjExt && <ProjectExtension user={user} onClose={() => setShowProjExt(false)} />}
           {showC2026 && <Cubes2026Plan user={user} onClose={() => setShowC2026(false)} />}
           {showReportPicker && (
