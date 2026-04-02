@@ -6769,7 +6769,7 @@
 
     // ── RESOURCE HUB MODAL ───────────────────────────────────────────
     function ResourceHub({ user, onClose }) {
-      const [tab, setTab] = useState('allocation');
+      const [tab, setTab] = useState(user?.role === 'admin' ? 'overview' : 'allocation');
       const [data, setData] = useState(null);
       const [loading, setLoading] = useState(true);
 
@@ -7067,6 +7067,28 @@
       }
 
       const recommendations = buildRecommendations();
+      const isAdmin = user?.role === 'admin';
+
+      // Build C-Level narrative from allocation data
+      function buildNarrative() {
+        if (!data) return null;
+        const overRoles  = ROLES.filter(r => pool[r] && util[r] > (pool[r]?.total_count || 0));
+        const fullRoles  = ROLES.filter(r => pool[r] && util[r] === (pool[r]?.total_count || 0));
+        const freeRoles  = ROLES.filter(r => pool[r] && util[r] < (pool[r]?.total_count || 0));
+        const parts = [];
+        if (overRoles.length)  parts.push({ type: 'error', text: `🔴 ${overRoles.map(r => ROLE_LABELS[r]).join(', ')} ${overRoles.length === 1 ? 'is' : 'are'} over-allocated — immediate action required.` });
+        if (fullRoles.length)  parts.push({ type: 'warn',  text: `🟡 ${fullRoles.map(r => ROLE_LABELS[r]).join(', ')} at full capacity — no room for new projects.` });
+        if (freeRoles.length)  parts.push({ type: 'ok',    text: `🟢 ${freeRoles.map(r => ROLE_LABELS[r]).join(', ')} ${freeRoles.length === 1 ? 'has' : 'have'} capacity available for new work.` });
+        const p1 = data.projects.filter(p => p.priority === 'P1');
+        if (p1.length > 1) parts.push({ type: 'info', text: `🔵 ${p1.length} P1 projects running simultaneously — high contention risk across all roles.` });
+        return parts;
+      }
+
+      const narrative = buildNarrative();
+
+      const ROLE_FULL_NAMES = { BA: 'Business Analysis', UIUX: 'UI/UX Design', BE: 'Backend Dev', FE: 'Frontend Dev', QC: 'Quality Control', PM: 'Proj. Management' };
+      const ROLE_COLORS_BG  = { BA: 'rgba(99,102,241,.08)', UIUX: 'rgba(139,92,246,.08)', BE: 'rgba(14,165,233,.08)', FE: 'rgba(34,197,94,.08)', QC: 'rgba(249,115,22,.08)', PM: 'rgba(239,68,68,.08)' };
+      const ROLE_COLORS_ACC = { BA: '#6366f1', UIUX: '#8b5cf6', BE: '#0ea5e9', FE: '#22c55e', QC: '#f97316', PM: '#ef4444' };
 
       return (
         <div className="res-hub-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -7076,16 +7098,24 @@
               <span style={{ fontSize: 22 }}>📊</span>
               <h3>Resource Hub
                 {data && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)', marginLeft: 10 }}>
-                  {cubesProj.length} CUBES Team Projects
+                  {cubesProj.length} CUBES · {implProj.length} Impl projects
                 </span>}
               </h3>
               <button className="res-hub-hdr-close" onClick={onClose} title="Close">✕</button>
             </div>
 
             <div className="res-hub-body">
-              {/* Tabs */}
+              {/* Tabs — Overview is admin-only */}
               <div className="rh-tabs">
-                {[['allocation', '📋 Project Allocation'], ['pool', '👥 Resource Pool'], ['resources', '👤 Resources']].map(([id, label]) => (
+                {isAdmin && (
+                  <button className={`rh-tab ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>
+                    📊 Overview
+                    {data && ROLES.some(r => pool[r] && util[r] > (pool[r]?.total_count || 0)) && (
+                      <span style={{ marginLeft: 5, background: '#ef4444', color: '#fff', fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 8 }}>!</span>
+                    )}
+                  </button>
+                )}
+                {[['allocation', '📋 Allocation'], ['pool', '👥 Pool'], ['resources', '👤 Resources']].map(([id, label]) => (
                   <button key={id} className={`rh-tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
                 ))}
               </div>
@@ -7096,47 +7126,22 @@
                 </div>
               )}
 
-              {/* ── Allocation Tab ── */}
-              {!loading && tab === 'allocation' && data && (
+              {/* ── OVERVIEW TAB (admin only) ── */}
+              {!loading && tab === 'overview' && isAdmin && data && (
                 <div>
-                  {/* CUBES Team utilization KPI blocks */}
-                  <TeamUtilRow label="CUBES Team — Utilization" utilMap={utilC} color="var(--brand)" />
-
-                  {/* Combined totals bar */}
-                  <div style={{ background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 18 }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 8 }}>Combined Pool vs Total Demand</div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {ROLES.filter(r => pool[r]).map(r => {
-                        const total = pool[r]?.total_count || 0;
-                        const used  = util[r] || 0;
-                        const avail = total - used;
-                        const cls   = avail < 0 ? 'over' : avail === 0 ? 'warn' : 'ok';
-                        return (
-                          <div key={r} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 56 }}>
-                            <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700 }}>{ROLE_LABELS[r]}</div>
-                            <div style={{ fontSize: 14, fontWeight: 800, color: avail < 0 ? '#ef4444' : avail === 0 ? '#f97316' : 'var(--text)' }}>{used}/{total}</div>
-                            <span className={`avail-chip ${cls}`} style={{ fontSize: 10, marginTop: 2 }}>
-                              {avail < 0 ? '⚠' : '✓'}{Math.abs(avail)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Recommendations */}
-                  {recommendations.length > 0 && (
-                    <div style={{ marginBottom: 20 }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>
-                        ⚡ Recommendations & Insights
+                  {/* C-Level Narrative Banner */}
+                  {narrative && narrative.length > 0 && (
+                    <div style={{ marginBottom: 20, borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                      <div style={{ background: 'var(--s2)', padding: '8px 14px', fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.07em', borderBottom: '1px solid var(--border)' }}>
+                        📋 Resource Status — Executive Summary
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {recommendations.map((rec, i) => {
-                          const colors = { error: '#ef4444', warn: '#f97316', ok: '#22c55e', info: 'var(--brand)' };
-                          const icons  = { error: '🔴', warn: '🟡', ok: '🟢', info: '🔵' };
+                      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {narrative.map((n, i) => {
+                          const bg = n.type === 'error' ? 'rgba(239,68,68,.06)' : n.type === 'warn' ? 'rgba(249,115,22,.06)' : n.type === 'ok' ? 'rgba(34,197,94,.06)' : 'rgba(99,102,241,.06)';
+                          const border = n.type === 'error' ? '#ef4444' : n.type === 'warn' ? '#f97316' : n.type === 'ok' ? '#22c55e' : '#6366f1';
                           return (
-                            <div key={i} style={{ background: 'var(--s2)', borderLeft: `3px solid ${colors[rec.type]}`, borderRadius: '0 8px 8px 0', padding: '8px 12px', fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
-                              {icons[rec.type]} {rec.msg}
+                            <div key={i} style={{ padding: '8px 12px', borderRadius: 7, background: bg, borderLeft: `3px solid ${border}`, fontSize: 12.5, fontWeight: 500, color: 'var(--text)', lineHeight: 1.5 }}>
+                              {n.text}
                             </div>
                           );
                         })}
@@ -7144,6 +7149,155 @@
                     </div>
                   )}
 
+                  {/* Role Utilization Cards — C-Level redesign */}
+                  <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>
+                    Resource Utilization by Discipline
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 22 }}>
+                    {ROLES.filter(r => pool[r]).map(r => {
+                      const total = pool[r]?.total_count || 1;
+                      const used  = util[r] || 0;
+                      const usedC = utilC[r] || 0;
+                      const usedI = utilI[r] || 0;
+                      const avail = total - used;
+                      const pctNum = total > 0 ? Math.round((used / total) * 100) : 0;
+                      const isOver = used > total;
+                      const isFull = used === total;
+                      const accent = ROLE_COLORS_ACC[r] || 'var(--brand)';
+                      const statusColor = isOver ? '#ef4444' : isFull ? '#f97316' : accent;
+                      const statusBg    = isOver ? 'rgba(239,68,68,.08)' : isFull ? 'rgba(249,115,22,.06)' : ROLE_COLORS_BG[r];
+                      const statusIcon  = isOver ? '🔴' : isFull ? '🟡' : '🟢';
+                      const statusLabel = isOver ? `Short ${Math.abs(avail)} ${Math.abs(avail) === 1 ? 'person' : 'people'}` : isFull ? 'At full capacity' : `${avail} available`;
+                      const barWidth = Math.min(pctNum, 100);
+                      const barOverPct = isOver ? Math.min(((used - total) / total) * 100, 40) : 0;
+                      return (
+                        <div key={r} style={{ background: statusBg, border: `1.5px solid ${isOver ? 'rgba(239,68,68,.3)' : isFull ? 'rgba(249,115,22,.25)' : 'var(--border)'}`, borderRadius: 12, padding: '14px 16px', position: 'relative', overflow: 'hidden' }}>
+                          {/* Top accent bar */}
+                          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: statusColor, borderRadius: '12px 12px 0 0', opacity: .7 }} />
+                          {/* Role name */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: accent, textTransform: 'uppercase', letterSpacing: '.05em' }}>{ROLE_LABELS[r]}</div>
+                              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>{ROLE_FULL_NAMES[r] || r}</div>
+                            </div>
+                            <span style={{ fontSize: 16 }}>{statusIcon}</span>
+                          </div>
+                          {/* Big % */}
+                          <div style={{ fontSize: 28, fontWeight: 900, color: statusColor, lineHeight: 1, marginBottom: 6 }}>
+                            {pctNum}<span style={{ fontSize: 14, fontWeight: 500, color: 'var(--muted)' }}>%</span>
+                          </div>
+                          {/* Progress bar */}
+                          <div style={{ height: 6, borderRadius: 3, background: 'var(--s2)', marginBottom: 10, position: 'relative', overflow: 'hidden' }}>
+                            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${barWidth}%`, background: statusColor, borderRadius: 3, opacity: .85, transition: 'width .4s' }} />
+                            {isOver && <div style={{ position: 'absolute', left: '100%', top: 0, bottom: 0, width: `${barOverPct}%`, background: '#ef4444', borderRadius: 3, opacity: .4, transform: 'translateX(-100%)' }} />}
+                          </div>
+                          {/* Stats row */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{used}</div>
+                              <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Demand</div>
+                            </div>
+                            <div style={{ textAlign: 'center', borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)' }}>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{total}</div>
+                              <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Pool</div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: statusColor }}>{Math.abs(avail)}</div>
+                              <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>{avail >= 0 ? 'Free' : 'Short'}</div>
+                            </div>
+                          </div>
+                          {/* CUBES vs Impl split */}
+                          {(usedC > 0 || usedI > 0) && (
+                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 10, fontSize: 10 }}>
+                              <span style={{ color: accent, fontWeight: 700 }}>CUBES: {usedC}</span>
+                              <span style={{ color: '#f97316', fontWeight: 700 }}>Impl: {usedI}</span>
+                            </div>
+                          )}
+                          {/* Status label */}
+                          <div style={{ marginTop: 8, fontSize: 10, fontWeight: 700, color: statusColor }}>
+                            {statusIcon} {statusLabel}
+                            {isOver && <span style={{ marginLeft: 6, fontSize: 9, background: 'rgba(239,68,68,.12)', color: '#ef4444', padding: '1px 6px', borderRadius: 4, fontWeight: 800 }}>HIRE NEEDED</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Pool capacity summary table */}
+                  <div style={{ marginBottom: 22 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>
+                      Capacity Summary — All Teams Combined
+                    </div>
+                    <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: 'var(--s2)' }}>
+                            <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>Metric</th>
+                            {ROLES.filter(r => pool[r]).map(r => (
+                              <th key={r} style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 800, fontSize: 11, color: ROLE_COLORS_ACC[r], borderBottom: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }}>{ROLE_LABELS[r]}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[
+                            { label: 'Pool Capacity', key: r => pool[r]?.total_count ?? '—', bold: true, color: null },
+                            { label: 'CUBES Demand', key: r => utilC[r] || 0, bold: false, color: 'var(--brand)' },
+                            { label: 'Impl Demand',  key: r => utilI[r] || 0, bold: false, color: '#f97316' },
+                            { label: 'Total Demand', key: r => util[r] || 0,  bold: true,  color: null },
+                          ].map((row, ri) => (
+                            <tr key={ri} style={{ borderBottom: '1px solid var(--border)', background: ri % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.02)' }}>
+                              <td style={{ padding: '7px 14px', fontWeight: row.bold ? 700 : 400, color: row.color || 'var(--text)', fontSize: 11 }}>{row.label}</td>
+                              {ROLES.filter(r => pool[r]).map(r => {
+                                const v = row.key(r);
+                                return <td key={r} style={{ padding: '7px 10px', textAlign: 'center', fontWeight: row.bold ? 700 : 400, color: row.color || 'var(--text)', borderLeft: '1px solid var(--border)' }}>{v}</td>;
+                              })}
+                            </tr>
+                          ))}
+                          <tr style={{ background: 'var(--s2)', borderTop: '2px solid var(--border)' }}>
+                            <td style={{ padding: '8px 14px', fontWeight: 800, fontSize: 11 }}>Available / Shortage</td>
+                            {ROLES.filter(r => pool[r]).map(r => {
+                              const avail = (pool[r]?.total_count || 0) - (util[r] || 0);
+                              const isOv = avail < 0;
+                              return (
+                                <td key={r} style={{ padding: '8px 10px', textAlign: 'center', borderLeft: '1px solid var(--border)' }}>
+                                  <span style={{ fontSize: 11, fontWeight: 800, color: isOv ? '#ef4444' : avail === 0 ? '#f97316' : '#22c55e' }}>
+                                    {isOv ? '⚠ ' : '✓ '}{avail >= 0 ? `+${avail}` : avail}
+                                  </span>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Recommendations & Insights */}
+                  {recommendations.length > 0 && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
+                        ⚡ Recommendations & Insights
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 8 }}>
+                        {recommendations.map((rec, i) => {
+                          const colors = { error: '#ef4444', warn: '#f97316', ok: '#22c55e', info: '#6366f1' };
+                          const icons  = { error: '🔴', warn: '🟡', ok: '🟢', info: '🔵' };
+                          const bgs    = { error: 'rgba(239,68,68,.06)', warn: 'rgba(249,115,22,.06)', ok: 'rgba(34,197,94,.06)', info: 'rgba(99,102,241,.06)' };
+                          return (
+                            <div key={i} style={{ background: bgs[rec.type], borderLeft: `3px solid ${colors[rec.type]}`, borderRadius: '0 8px 8px 0', padding: '10px 14px', fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
+                              {icons[rec.type]} {rec.msg}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Allocation Tab ── */}
+              {!loading && tab === 'allocation' && data && (
+                <div>
                   {/* CUBES projects table */}
                   <AllocTable
                     projects={cubesProj}
@@ -7159,38 +7313,6 @@
                       onSaved={reload}
                     />
                   )}
-
-                  {/* Pool capacity summary */}
-                  <div style={{ overflowX: 'auto', marginTop: 8 }}>
-                    <table className="alloc-table">
-                      <thead>
-                        <tr>
-                          <th>Row</th>
-                          {ROLES.map(r => <th key={r}>{ROLE_LABELS[r]}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr style={{ background: 'rgba(129,140,248,.04)' }}>
-                          <td style={{ fontWeight: 600, fontSize: 11, color: 'var(--brand)' }}>CUBES Used</td>
-                          {ROLES.map(r => <td key={r} style={{ textAlign: 'center' }}>{utilC[r] || 0}</td>)}
-                        </tr>
-                        <tr className="pool-row">
-                          <td>Pool Capacity</td>
-                          {ROLES.map(r => <td key={r} style={{ textAlign: 'center' }}>{pool[r]?.total_count ?? '—'}</td>)}
-                        </tr>
-                        <tr className="avail-row">
-                          <td>Available</td>
-                          {ROLES.map(r => {
-                            const avail = (pool[r]?.total_count || 0) - (utilC[r] || 0);
-                            const cls = avail < 0 ? 'over' : avail === 0 ? 'warn' : 'ok';
-                            return <td key={r} style={{ textAlign: 'center' }}>
-                              <span className={`avail-chip ${cls}`}>{avail < 0 ? '⚠' : '✓'} {Math.abs(avail)}</span>
-                            </td>;
-                          })}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
               )}
 
