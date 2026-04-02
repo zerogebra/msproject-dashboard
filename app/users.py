@@ -25,17 +25,19 @@ def verify_password(user: dict, pw: str) -> bool:
 
 # ── helpers ──────────────────────────────────────────────────────
 
-ALL_MODULES = ["project_page", "project_ext", "c2026", "standup", "report", "resources"]
+ALL_MODULES = ["project_page", "project_ext", "c2026", "standup", "report", "resources",
+               "action_items", "intelligence"]
 
 def _row_to_dict(row) -> dict:
     if row is None:
         return None
     d = dict(row)
-    d["allowed_projects"] = json.loads(d.get("allowed_projects") or "[]")
+    d["allowed_projects"]  = json.loads(d.get("allowed_projects")  or "[]")
     d["allowed_products"]  = json.loads(d.get("allowed_products")  or "[]")
     raw_modules = json.loads(d.get("allowed_modules") or "[]")
     # Empty list means "all modules" (default for existing users)
-    d["allowed_modules"] = raw_modules if raw_modules else ALL_MODULES[:]
+    d["allowed_modules"]   = raw_modules if raw_modules else ALL_MODULES[:]
+    d["settings_override"] = json.loads(d.get("settings_override") or "{}")
     d["active"] = bool(d["active"])
     return d
 
@@ -98,6 +100,9 @@ def update_user(user_id: str, updates: dict) -> dict | None:
         updates["allowed_products"] = json.dumps(updates["allowed_products"])
     if "allowed_modules" in updates:
         updates["allowed_modules"] = json.dumps(updates["allowed_modules"])
+    if "settings_override" in updates:
+        v = updates["settings_override"]
+        updates["settings_override"] = json.dumps(v) if isinstance(v, dict) else (v or "{}")
     if "active" in updates:
         updates["active"] = 1 if updates["active"] else 0
 

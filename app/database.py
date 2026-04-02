@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS users (
     role            TEXT NOT NULL DEFAULT 'viewer',
     project_filter  TEXT NOT NULL DEFAULT 'all',
     allowed_projects TEXT NOT NULL DEFAULT '[]',
-    active          INTEGER NOT NULL DEFAULT 1
+    active          INTEGER NOT NULL DEFAULT 1,
+    settings_override TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS overrides (
@@ -546,6 +547,12 @@ def init_db() -> None:
         # schema v2.7 — plain_password (admin-generated passwords stored as plain text)
         try:
             conn.execute("ALTER TABLE users ADD COLUMN plain_password TEXT")
+        except Exception:
+            pass
+
+        # schema v2.9 — per-user settings overrides (column visibility etc.)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN settings_override TEXT NOT NULL DEFAULT '{}'")
         except Exception:
             pass
 

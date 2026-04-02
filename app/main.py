@@ -344,17 +344,18 @@ def login(req: LoginRequest):
         raise HTTPException(401, "Incorrect password.")
     # Return safe user info (no sensitive fields)
     return {
-        "id":               user["id"],
-        "name":             user["name"],
-        "username":         user["username"],
-        "email":            user["email"],
-        "role":             user["role"],
-        "project_filter":   user.get("project_filter", "all"),
-        "allowed_projects": user.get("allowed_projects", []),
-        "allowed_products": user.get("allowed_products", []),
-        "c2026_access":     user.get("c2026_access", "view"),
-        "allowed_modules":  user.get("allowed_modules", []),
-        "has_password":     bool(user.get("password_hash")),
+        "id":                user["id"],
+        "name":              user["name"],
+        "username":          user["username"],
+        "email":             user["email"],
+        "role":              user["role"],
+        "project_filter":    user.get("project_filter", "all"),
+        "allowed_projects":  user.get("allowed_projects", []),
+        "allowed_products":  user.get("allowed_products", []),
+        "c2026_access":      user.get("c2026_access", "view"),
+        "allowed_modules":   user.get("allowed_modules", []),
+        "settings_override": user.get("settings_override", {}),
+        "has_password":      bool(user.get("password_hash")),
     }
 
 
@@ -400,17 +401,18 @@ def create_user(req: UserCreateRequest, caller_id: str):
 
 
 class UserUpdateRequest(BaseModel):
-    name:             Optional[str]       = None
-    username:         Optional[str]       = None
-    email:            Optional[str]       = None
-    role:             Optional[str]       = None
-    project_filter:   Optional[str]       = None
-    allowed_projects: Optional[List[str]] = None
-    allowed_products: Optional[List[str]] = None
-    c2026_access:     Optional[str]       = None   # edit | view | no_access
-    allowed_modules:  Optional[List[str]] = None   # [] = all; specific list = restricted
-    active:           Optional[bool]      = None
-    password:         Optional[str]       = None   # set to reset password
+    name:              Optional[str]       = None
+    username:          Optional[str]       = None
+    email:             Optional[str]       = None
+    role:              Optional[str]       = None
+    project_filter:    Optional[str]       = None
+    allowed_projects:  Optional[List[str]] = None
+    allowed_products:  Optional[List[str]] = None
+    c2026_access:      Optional[str]       = None   # edit | view | no_access
+    allowed_modules:   Optional[List[str]] = None   # [] = all; specific list = restricted
+    active:            Optional[bool]      = None
+    password:          Optional[str]       = None   # set to reset password
+    settings_override: Optional[dict]      = None   # per-user column/panel visibility overrides
 
 @app.post("/api/users/{user_id}/reset-password")
 def reset_password(user_id: str, caller_id: str):
