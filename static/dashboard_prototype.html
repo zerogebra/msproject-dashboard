@@ -2182,8 +2182,8 @@
       z-index: 8000; display: flex; align-items: center; justify-content: center;
     }
     .res-hub-panel {
-      background: var(--s1); width: min(75vw, 1400px);
-      height: 90vh; display: flex; flex-direction: column;
+      background: var(--s1); width: min(97vw, 1800px);
+      height: 92vh; display: flex; flex-direction: column;
       border-radius: 14px;
       box-shadow: 0 20px 60px rgba(0,0,0,.4);
       animation: fadeInScale .2s ease;
@@ -6466,7 +6466,7 @@
 
       return (
         <div className="res-hub-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-          <div className="res-hub-panel" style={{ maxWidth: 900 }}>
+          <div className="res-hub-panel">
             <div className="res-hub-hdr">
               <span style={{ fontSize: 22 }}>📋</span>
               <h3>Project Extension
@@ -7977,7 +7977,7 @@
 
       return (
         <div className="res-hub-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-          <div className="res-hub-panel" style={{ maxWidth: 1100 }}>
+          <div className="res-hub-panel">
             <div className="res-hub-hdr">
               <span style={{ fontSize: 20 }}>🗄</span>
               <h3>Database Viewer <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)', marginLeft: 6 }}>Read-only · Admin only</span></h3>
@@ -8877,26 +8877,34 @@
         if (!silent) setLoading(false);
       }
 
+      // One-time setup: light mode
       useEffect(() => {
         document.documentElement.classList.toggle('light', true);
-        if (user) {
-          loadProjects(user);
-          // Load dashboard settings for the user's role
-          api.getDashboardSettings().then(s => {
-            const roleKey = user.role === 'admin' ? null : user.role; // admins see all
-            if (roleKey && s[roleKey]) {
-              setDashSettings({ ...DEFAULT_SETTINGS, ...s[roleKey] });
-            }
-          }).catch(() => {});
-          // Poll pending change requests every 30s for admins
-          if (user.role === 'admin') {
-            const refresh = () => api.pendingCRCount().then(r => setPendingCR(r.pending_count)).catch(() => { });
-            refresh();
-            const iv = setInterval(refresh, 30000);
-            return () => clearInterval(iv);
-          }
-        }
       }, []);
+
+      // Re-run whenever the logged-in user changes (login OR logout)
+      useEffect(() => {
+        if (!user) {
+          setDashSettings(DEFAULT_SETTINGS);
+          setPendingCR(0);
+          return;
+        }
+        loadProjects(user);
+        // Load dashboard settings for the user's role
+        api.getDashboardSettings().then(s => {
+          const roleKey = user.role === 'admin' ? null : user.role;
+          if (roleKey && s[roleKey]) {
+            setDashSettings({ ...DEFAULT_SETTINGS, ...s[roleKey] });
+          }
+        }).catch(() => {});
+        // Poll pending change requests every 30s for admins
+        if (user.role === 'admin') {
+          const refresh = () => api.pendingCRCount().then(r => setPendingCR(r.pending_count)).catch(() => { });
+          refresh();
+          const iv = setInterval(refresh, 30000);
+          return () => clearInterval(iv);
+        }
+      }, [user?.id]);
 
       // Expose reload function for admin panel project deletions/renames
       React.useEffect(() => {
@@ -8911,7 +8919,7 @@
 
       function handleLogin(u) {
         setUser(u);
-        loadProjects(u);
+        // useEffect([user?.id]) will fire and call loadProjects automatically
       }
 
       function handleLogout() {
@@ -8971,17 +8979,19 @@
       }
 
       return (
-        <div className="shell">
-          <Sidebar projects={visible} selected={selected}
-            onSelect={setSelected}
-            onClear={() => setSelected(new Set())}
-            onExport={() => window.print()}
-            user={user}
-            onAddBlank={handleAddBlank}
-            onUpload={handleUpload}
-            onSyncMpp={handleSyncMpp}
-            syncing={syncing}
-            settings={dashSettings} />
+        <div className="shell" style={!canSee('project_page') ? { gridTemplateColumns: '1fr' } : {}}>
+          {canSee('project_page') && (
+            <Sidebar projects={visible} selected={selected}
+              onSelect={setSelected}
+              onClear={() => setSelected(new Set())}
+              onExport={() => window.print()}
+              user={user}
+              onAddBlank={handleAddBlank}
+              onUpload={handleUpload}
+              onSyncMpp={handleSyncMpp}
+              syncing={syncing}
+              settings={dashSettings} />
+          )}
           <div className="main">
             <div className="topbar">
               <div>
