@@ -5631,6 +5631,7 @@
       const df1D   = disciplines.QC?.df1Days || 3;
       const df2D   = disciplines.QC?.df2Days || 2;
       const regD   = disciplines.QC?.regDays || 2;
+      const prD    = disciplines.QC?.prDays  || 2;
 
       // ── Phase 1: Requirements & Analysis ──────────────────────────────
       const p1Start  = new Date(startDate);
@@ -5722,12 +5723,12 @@
       // ── Phase 4: Deployment & Go-Live ─────────────────────────────────
       const p4Start = addWorkDays(p3End, 1);
       const prStart = new Date(p4Start);
-      const prEnd   = addWorkDays(prStart, 1);
+      const prEnd   = addWorkDays(prStart, Math.ceil(prD) - 1);
       const glDate  = addWorkDays(prEnd, 1);
       const p4End   = new Date(glDate);
 
       tasks.push({ title: 'Phase 4: Deployment & Go-Live', level: 2, is_summary: true, start: fmtDate(p4Start), end: fmtDate(p4End) });
-      tasks.push({ title: 'Production Release Preparation', level: 3, start: fmtDate(prStart), end: fmtDate(prEnd), duration_days: 2, predecessor: 'Regression + Retest' });
+      tasks.push({ title: 'Production Release Preparation', level: 3, start: fmtDate(prStart), end: fmtDate(prEnd), duration_days: prD, predecessor: 'Regression + Retest' });
       tasks.push({ title: 'Go-Live', level: 3, is_milestone: true, start: fmtDate(p4End), end: fmtDate(p4End), predecessor: 'Production Release Preparation' });
 
       return tasks;
@@ -5749,6 +5750,7 @@
           df1Days:   inflate(disciplines.QC?.df1Days),
           df2Days:   inflate(disciplines.QC?.df2Days),
           regDays:   inflate(disciplines.QC?.regDays),
+          prDays:    inflate(disciplines.QC?.prDays),
           resources: disciplines.QC?.resources || 1,
         },
       };
@@ -5774,7 +5776,7 @@
         UIUX: { days: 7,  resources: 1 },
         BE:   { days: 14, resources: 1 },
         FE:   { days: 10, resources: 1 },
-        QC:   { cyc1Days: 4, cyc2Days: 2, prepDays: 3, df1Days: 3, df2Days: 2, regDays: 2, resources: 1 },
+        QC:   { cyc1Days: 4, cyc2Days: 2, prepDays: 3, df1Days: 3, df2Days: 2, regDays: 2, prDays: 2, resources: 1 },
       });
       // Implementation buffer margin (default 20%)
       const [implMargin, setImplMargin] = useState(20);
@@ -5822,10 +5824,10 @@
       }, [startDate, disciplines, overlapBaUiux, overlapBeFe, implMargin]);
 
       function setDays(role, v) {
-        setDiscs(d => ({ ...d, [role]: { ...d[role], days: Math.max(1, Number(v) || 1) } }));
+        setDiscs(d => ({ ...d, [role]: { ...d[role], days: Math.max(0.5, Number(v) || 0.5) } }));
       }
       function setQcField(field, v) {
-        setDiscs(d => ({ ...d, QC: { ...d.QC, [field]: Math.max(1, Number(v) || 1) } }));
+        setDiscs(d => ({ ...d, QC: { ...d.QC, [field]: Math.max(0.5, Number(v) || 0.5) } }));
       }
       function setRes(role, delta) {
         setDiscs(d => ({ ...d, [role]: { ...d[role], resources: Math.max(1, (d[role].resources || 1) + delta) } }));
@@ -6018,7 +6020,7 @@
                           <div className="disc-inputs">
                             <div className="disc-input-group" style={{ flex: 2 }}>
                               <div className="disc-input-label">Duration (days)</div>
-                              <input type="number" min="1" className="disc-num days"
+                              <input type="number" min="0.5" step="0.5" className="disc-num days"
                                 value={disc.days} onChange={e => setDays(dc.role, e.target.value)} />
                             </div>
                             <div className="disc-input-group">
@@ -6057,11 +6059,12 @@
                           { field: 'df1Days', label: 'Defect Fixing Cycle 1' },
                           { field: 'df2Days', label: 'Defect Fixing Cycle 2' },
                           { field: 'regDays', label: 'Regression + Retest' },
+                          { field: 'prDays',  label: 'Prod. Release Prep' },
                         ].map(f => (
                           <div key={f.field} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontSize: 11, color: 'var(--muted)', flex: 1 }}>{f.label}</span>
-                            <input type="number" min="1" className="disc-num days" style={{ width: 50 }}
-                              value={disciplines.QC?.[f.field] || 1}
+                            <input type="number" min="0.5" step="0.5" className="disc-num days" style={{ width: 50 }}
+                              value={disciplines.QC?.[f.field] || 0.5}
                               onChange={e => setQcField(f.field, e.target.value)} />
                             <span style={{ fontSize: 11, color: 'var(--muted)' }}>d</span>
                           </div>
@@ -6103,7 +6106,7 @@
                           <div className="disc-inputs">
                             <div className="disc-input-group" style={{ flex: 2 }}>
                               <div className="disc-input-label">Duration (days)</div>
-                              <input type="number" min="1" className="disc-num days"
+                              <input type="number" min="0.5" step="0.5" className="disc-num days"
                                 value={disc.days} onChange={e => setDays(dc.role, e.target.value)} />
                             </div>
                             <div className="disc-input-group">
@@ -6240,19 +6243,21 @@
                                   </td>
                                   <td>
                                     {!isPhase && !isMs ? (
-                                      <input type="number" min="1" max="365"
+                                      <input type="number" min="0.5" step="0.5" max="365"
                                         value={t.duration_days || ''}
                                         onChange={e => {
-                                          const newDays = Math.max(1, parseInt(e.target.value) || 1);
-                                          // Map back to disciplines
+                                          const newDays = Math.max(0.5, parseFloat(e.target.value) || 0.5);
                                           if (t.role === 'BA') setDays('BA', newDays);
                                           else if (t.role === 'UIUX') setDays('UIUX', newDays);
                                           else if (t.role === 'BE' && t.title.includes('Backend')) setDays('BE', newDays);
                                           else if (t.role === 'FE') setDays('FE', newDays);
                                           else if (t.title === 'QC Preparation') setQcField('prepDays', newDays);
+                                          else if (t.title.includes('QC Execution Cycle 1')) setQcField('cyc1Days', newDays);
+                                          else if (t.title.includes('QC Execution Cycle 2')) setQcField('cyc2Days', newDays);
                                           else if (t.title.includes('Defect Fixing (Cycle 1)')) setQcField('df1Days', newDays);
                                           else if (t.title.includes('Defect Fixing (Cycle 2)')) setQcField('df2Days', newDays);
                                           else if (t.title.includes('Regression')) setQcField('regDays', newDays);
+                                          else if (t.title.includes('Production Release')) setQcField('prDays', newDays);
                                         }}
                                         style={{ width: 42, padding: '2px 4px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', textAlign: 'center' }}
                                       />
@@ -6324,9 +6329,9 @@
                                   </td>
                                   <td>
                                     {!ct.is_summary && !ct.is_milestone ? (
-                                      <input type="number" min="1"
+                                      <input type="number" min="0.5" step="0.5"
                                         value={ct.duration_days}
-                                        onChange={e => updateCustomRow(ct.id, 'duration_days', Math.max(1, parseInt(e.target.value) || 1))}
+                                        onChange={e => updateCustomRow(ct.id, 'duration_days', Math.max(0.5, parseFloat(e.target.value) || 0.5))}
                                         style={{ width: 40, fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', textAlign: 'center' }} />
                                     ) : '—'}
                                   </td>
@@ -6379,6 +6384,67 @@
                       </div>
                     </div>
                   </div>
+
+                  {/* ── Mini Gantt Timeline Preview ── */}
+                  {(() => {
+                    const leafTasks = generatedTasks.filter(t => !t.is_summary && !t.is_milestone && t.start && t.end);
+                    if (!leafTasks.length) return null;
+                    const allDates = leafTasks.flatMap(t => [new Date(t.start), new Date(t.end)]);
+                    const minDate  = new Date(Math.min(...allDates.map(d => d.getTime())));
+                    const maxDate  = new Date(Math.max(...allDates.map(d => d.getTime())));
+                    const totalMs  = maxDate - minDate || 1;
+                    const ROLE_GANTT_COLOR = { BA: '#6366f1', UIUX: '#8b5cf6', BE: '#0ea5e9', FE: '#22c55e', QC: '#f97316', PM: '#ef4444' };
+                    const pct = (d) => ((new Date(d) - minDate) / totalMs) * 100;
+                    const wPct = (s, e) => Math.max(0.5, ((new Date(e) - new Date(s)) / totalMs) * 100);
+
+                    // Build month labels
+                    const months = [];
+                    let cur = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+                    while (cur <= maxDate) {
+                      const left = ((cur - minDate) / totalMs) * 100;
+                      months.push({ label: cur.toLocaleString('default', { month: 'short', year: '2-digit' }), left });
+                      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+                    }
+
+                    return (
+                      <div style={{ marginTop: 18 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>
+                          📅 Timeline Preview — CUBES Plan
+                        </div>
+                        <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--s2)', padding: '10px 12px' }}>
+                          {/* Month ruler */}
+                          <div style={{ position: 'relative', height: 16, marginBottom: 6, marginLeft: 130 }}>
+                            {months.map((m, i) => (
+                              <div key={i} style={{ position: 'absolute', left: `${m.left}%`, fontSize: 9, color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap', transform: 'translateX(-50%)' }}>
+                                {m.label}
+                              </div>
+                            ))}
+                          </div>
+                          {/* Task rows */}
+                          {leafTasks.map((t, i) => {
+                            const color = ROLE_GANTT_COLOR[t.role] || 'var(--brand)';
+                            return (
+                              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <div style={{ width: 130, flexShrink: 0, fontSize: 10, color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.title}>
+                                  {t.role && <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: color, marginRight: 4, verticalAlign: 'middle' }} />}
+                                  {t.title}
+                                </div>
+                                <div style={{ flex: 1, position: 'relative', height: 16, background: 'var(--s1)', borderRadius: 4, minWidth: 300 }}>
+                                  <div style={{ position: 'absolute', left: `${pct(t.start)}%`, width: `${wPct(t.start, t.end)}%`, height: '100%', background: color, borderRadius: 4, opacity: 0.85, minWidth: 4, display: 'flex', alignItems: 'center', paddingLeft: 4 }}>
+                                    <span style={{ fontSize: 9, color: '#fff', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{t.duration_days}d</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {/* Date range label */}
+                          <div style={{ marginTop: 6, marginLeft: 130, fontSize: 10, color: 'var(--muted)' }}>
+                            {minDate.toLocaleDateString()} → {maxDate.toLocaleDateString()} &nbsp;|&nbsp; <strong style={{ color: 'var(--text)' }}>{totalDays} working days total</strong>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

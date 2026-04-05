@@ -616,6 +616,15 @@ def init_db() -> None:
         # Seed 8 extension (lightweight) projects if not already present
         _seed_ext_projects(conn)
 
+        # data migration: ensure all projects with a cr_id are flagged as lightweight
+        # (older rows may have is_lightweight=0 if seeded before schema v1.8)
+        try:
+            conn.execute(
+                "UPDATE projects SET is_lightweight=1 WHERE cr_id IS NOT NULL AND TRIM(cr_id) != ''"
+            )
+        except Exception:
+            pass
+
         # schema v1.8 — named resources table
         # (resources table is created via _SCHEMA above; just ensure it exists via executescript)
 
