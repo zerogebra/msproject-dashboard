@@ -5626,6 +5626,8 @@
       const feD  = disciplines.FE?.days    || 0;   const feR  = disciplines.FE?.resources    || 1;
       const qcR    = disciplines.QC?.resources || 1;
       const qcPrep = disciplines.QC?.prepDays || 3;
+      const cyc1D  = disciplines.QC?.cyc1Days || 4;
+      const cyc2D  = disciplines.QC?.cyc2Days || 2;
       const df1D   = disciplines.QC?.df1Days || 3;
       const df2D   = disciplines.QC?.df2Days || 2;
       const regD   = disciplines.QC?.regDays || 2;
@@ -5691,13 +5693,13 @@
       // QC Execution starts after BOTH Dev Complete AND QC Prep are done
       const qcExecReady = new Date(Math.max(p2End.getTime(), qcPrepEnd.getTime()));
       const cyc1Start   = addWorkDays(qcExecReady, 1);
-      const cyc1End     = addWorkDays(cyc1Start, 4 - 1);   // 4 days fixed
+      const cyc1End     = addWorkDays(cyc1Start, cyc1D - 1);
 
       const df1Start = addWorkDays(cyc1End, 1);
       const df1End   = addWorkDays(df1Start, df1D - 1);
 
       const cyc2Start = addWorkDays(df1End, 1);
-      const cyc2End   = addWorkDays(cyc2Start, 2 - 1);     // 2 days fixed
+      const cyc2End   = addWorkDays(cyc2Start, cyc2D - 1);
 
       const df2Start = addWorkDays(cyc2End, 1);
       const df2End   = addWorkDays(df2Start, df2D - 1);
@@ -5711,9 +5713,9 @@
       tasks.push({ title: 'Phase 3: Testing & QC', level: 2, is_summary: true, start: fmtDate(p3Start), end: fmtDate(p3End) });
       tasks.push({ title: 'QC Preparation', level: 3, start: fmtDate(qcPrepStart), end: fmtDate(qcPrepEnd), role: 'QC', resources: 1, duration_days: qcPrep, predecessor: 'UI/UX Design' });
       // QC Execution: single predecessor = Development Complete (the later gate); QC Prep runs in parallel
-      tasks.push({ title: 'QC Execution Cycle 1', level: 3, start: fmtDate(cyc1Start), end: fmtDate(cyc1End), role: 'QC', resources: qcR, duration_days: 4, predecessor: 'Development Complete' });
+      tasks.push({ title: 'QC Execution Cycle 1', level: 3, start: fmtDate(cyc1Start), end: fmtDate(cyc1End), role: 'QC', resources: qcR, duration_days: cyc1D, predecessor: 'Development Complete' });
       tasks.push({ title: 'Defect Fixing (Cycle 1)', level: 3, start: fmtDate(df1Start), end: fmtDate(df1End), role: 'BE', resources: beR, duration_days: df1D, predecessor: 'QC Execution Cycle 1' });
-      tasks.push({ title: 'QC Execution Cycle 2', level: 3, start: fmtDate(cyc2Start), end: fmtDate(cyc2End), role: 'QC', resources: qcR, duration_days: 2, predecessor: 'Defect Fixing (Cycle 1)' });
+      tasks.push({ title: 'QC Execution Cycle 2', level: 3, start: fmtDate(cyc2Start), end: fmtDate(cyc2End), role: 'QC', resources: qcR, duration_days: cyc2D, predecessor: 'Defect Fixing (Cycle 1)' });
       tasks.push({ title: 'Defect Fixing (Cycle 2)', level: 3, start: fmtDate(df2Start), end: fmtDate(df2End), role: 'BE', resources: beR, duration_days: df2D, predecessor: 'QC Execution Cycle 2' });
       tasks.push({ title: 'Regression + Retest', level: 3, start: fmtDate(regStart), end: fmtDate(regEnd), role: 'QC', resources: qcR, duration_days: regD, predecessor: 'Defect Fixing (Cycle 2)' });
 
@@ -5741,6 +5743,8 @@
         BE:   { days: inflate(disciplines.BE?.days),   resources: disciplines.BE?.resources   || 1 },
         FE:   { days: inflate(disciplines.FE?.days),   resources: disciplines.FE?.resources   || 1 },
         QC:   {
+          cyc1Days:  inflate(disciplines.QC?.cyc1Days),
+          cyc2Days:  inflate(disciplines.QC?.cyc2Days),
           prepDays:  inflate(disciplines.QC?.prepDays),
           df1Days:   inflate(disciplines.QC?.df1Days),
           df2Days:   inflate(disciplines.QC?.df2Days),
@@ -5770,7 +5774,7 @@
         UIUX: { days: 7,  resources: 1 },
         BE:   { days: 14, resources: 1 },
         FE:   { days: 10, resources: 1 },
-        QC:   { prepDays: 3, df1Days: 3, df2Days: 2, regDays: 2, resources: 1 },
+        QC:   { cyc1Days: 4, cyc2Days: 2, prepDays: 3, df1Days: 3, df2Days: 2, regDays: 2, resources: 1 },
       });
       // Implementation buffer margin (default 20%)
       const [implMargin, setImplMargin] = useState(20);
@@ -6044,14 +6048,11 @@
                           {completedPhases.has('QC') ? '✓ Done' : 'Mark Done'}
                         </label>
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Fixed QC Execution</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.8, marginBottom: 8 }}>
-                        QC Execution Cycle 1: <strong style={{color:'var(--text)'}}>4 days</strong><br/>
-                        QC Execution Cycle 2: <strong style={{color:'var(--text)'}}>2 days</strong>
-                      </div>
                       <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Configurable</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
                         {[
+                          { field: 'cyc1Days', label: 'QC Execution Cycle 1' },
+                          { field: 'cyc2Days', label: 'QC Execution Cycle 2' },
                           { field: 'prepDays', label: 'QC Preparation' },
                           { field: 'df1Days', label: 'Defect Fixing Cycle 1' },
                           { field: 'df2Days', label: 'Defect Fixing Cycle 2' },

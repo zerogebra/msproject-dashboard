@@ -154,7 +154,7 @@ def portfolio(username: str = "user"):
             # Skip lightweight (extension) projects that are flagged off from main page
             is_lw = bool(p["is_lightweight"]) if "is_lightweight" in p.keys() else False
             show_on_main = p["show_on_main"] if "show_on_main" in p.keys() else 1
-            if is_lw and not show_on_main:
+            if is_lw:
                 continue
 
             # Skip projects the user is not allowed to see
