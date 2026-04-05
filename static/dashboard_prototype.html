@@ -9623,25 +9623,14 @@
       }, [projects]);
 
       function handleLogin(u) {
-        setLoading(true);   // show "Connecting…" on first render — no blank flash
-        setUser(u);
-        loadProjects(u);
-        api.getDashboardSettings().then(s => {
-          const roleKey = u.role === 'admin' ? null : u.role;
-          const roleSettings = roleKey && s[roleKey] ? s[roleKey] : {};
-          const userOverride = u.settings_override || {};
-          setDashSettings({ ...DEFAULT_SETTINGS, ...roleSettings, ...userOverride });
-        }).catch(() => {});
-        if (u.role === 'admin') {
-          api.pendingCRCount().then(r => setPendingCR(r.pending_count)).catch(() => {});
-        }
+        // Store session then hard-reload — prevents blank page on login
+        try { localStorage.setItem('pmUser', JSON.stringify(u)); } catch (_) {}
+        window.location.reload();
       }
 
       function handleLogout() {
         localStorage.removeItem('pmUser');
-        setUser(null);
-        setProjects([]);
-        setSelected(new Set());
+        window.location.reload();
       }
 
       function toggleMode() {
