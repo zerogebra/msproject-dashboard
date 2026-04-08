@@ -166,6 +166,23 @@ CREATE TABLE IF NOT EXISTS c2026_plan (
     data    TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS project_progress (
+    id          TEXT PRIMARY KEY,
+    project_name TEXT NOT NULL,
+    project_code TEXT,
+    status      TEXT NOT NULL DEFAULT '',
+    ba          TEXT NOT NULL DEFAULT '',
+    uiux        TEXT NOT NULL DEFAULT '',
+    qc          TEXT NOT NULL DEFAULT '',
+    c_classic   TEXT NOT NULL DEFAULT '',
+    fe          TEXT NOT NULL DEFAULT '',
+    be          TEXT NOT NULL DEFAULT '',
+    due_date    TEXT NOT NULL DEFAULT '',
+    start_date  TEXT NOT NULL DEFAULT '',
+    end_date    TEXT NOT NULL DEFAULT '',
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_overrides_project  ON overrides(project);
 CREATE INDEX IF NOT EXISTS idx_audit_project       ON audit_log(project);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp     ON audit_log(timestamp);
@@ -340,6 +357,58 @@ def _seed_ext_projects(conn):
                     )
                 except Exception:
                     pass
+
+
+# ── Project Progress seed ─────────────────────────────────────────
+def _seed_project_progress(conn):
+    count = conn.execute("SELECT COUNT(*) FROM project_progress").fetchone()[0]
+    if count > 0:
+        return
+    rows = [
+        # (project_name, project_code, status, ba, uiux, qc, c_classic, fe, be, due_date, start_date, end_date, sort_order)
+        ("Cubes Enterprise Wallets", "EW",
+         "Active",
+         "done", "done", "5", "5", "5", "5",
+         "2026-04-29", "", "", 1),
+        ("Version Control", None,
+         "Product team already discussed the Version Control with Dev team done 6-April expected",
+         "done", "done", "", "", "", "",
+         "2026-04-29", "", "", 2),
+        ("Appraisal System Integration", None,
+         "orientation session waiting Pro->Dev done NO NA TBD",
+         "", "", "", "", "", "",
+         "2026-05-10", "", "", 3),
+        ("APQC", "APQC",
+         "waiting for team feedback",
+         "", "", "", "", "", "",
+         "2026-04-09", "2026-03-04", "2026-03-31", 4),
+        ("ICP", "ICP",
+         "",
+         "", "", "", "", "", "",
+         "", "2026-02-23", "2026-03-24", 5),
+        ("EF", "EF",
+         "",
+         "", "", "", "", "", "",
+         "", "2026-02-23", "2026-04-06", 6),
+        ("PMO/SPM - DOF", None,
+         "waiting product team input",
+         "", "", "", "", "", "",
+         "", "", "", 7),
+        ("Cubes Road map", None,
+         "Github POC to do it for appraisal and version control for now",
+         "", "", "", "", "", "",
+         "", "", "", 8),
+        ("DOF", None,
+         "waiting QC",
+         "", "", "", "", "", "",
+         "", "", "", 9),
+    ]
+    for r in rows:
+        conn.execute(
+            "INSERT INTO project_progress (id, project_name, project_code, status, ba, uiux, qc, c_classic, fe, be, due_date, start_date, end_date, sort_order) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()),) + r
+        )
 
 
 # ── init & migration ─────────────────────────────────────────────
@@ -615,6 +684,43 @@ def init_db() -> None:
 
         # Seed 8 extension (lightweight) projects if not already present
         _seed_ext_projects(conn)
+
+        # schema v2.11 — project_comments (stakeholder comments in executive summary)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS project_comments (
+                    project_code TEXT PRIMARY KEY,
+                    comment      TEXT NOT NULL DEFAULT '',
+                    updated_by   TEXT NOT NULL DEFAULT '',
+                    updated_at   TEXT NOT NULL DEFAULT ''
+                )
+            """)
+        except Exception:
+            pass
+
+        # schema v2.10 — project_progress tracker table
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS project_progress (
+                    id          TEXT PRIMARY KEY,
+                    project_name TEXT NOT NULL,
+                    project_code TEXT,
+                    status      TEXT NOT NULL DEFAULT '',
+                    ba          TEXT NOT NULL DEFAULT '',
+                    uiux        TEXT NOT NULL DEFAULT '',
+                    qc          TEXT NOT NULL DEFAULT '',
+                    c_classic   TEXT NOT NULL DEFAULT '',
+                    fe          TEXT NOT NULL DEFAULT '',
+                    be          TEXT NOT NULL DEFAULT '',
+                    due_date    TEXT NOT NULL DEFAULT '',
+                    start_date  TEXT NOT NULL DEFAULT '',
+                    end_date    TEXT NOT NULL DEFAULT '',
+                    sort_order  INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+        except Exception:
+            pass
+        _seed_project_progress(conn)
 
         # data migration: ensure all projects with a cr_id are flagged as lightweight
         # (older rows may have is_lightweight=0 if seeded before schema v1.8)

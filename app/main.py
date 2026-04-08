@@ -1450,3 +1450,88 @@ async def save_c2026(request: Request, caller_id: str):
             (_json.dumps(body),)
         )
     return {"status": "ok"}
+
+
+# ── Project Comments (Stakeholder Comments & Risks) ──────────────────────────
+
+@app.get("/api/project-comments")
+def get_project_comments(caller_id: str = ""):
+    from app.database import get_conn
+    with get_conn() as conn:
+        rows = conn.execute("SELECT project_code, comment, updated_by, updated_at FROM project_comments").fetchall()
+    return {r["project_code"]: {"comment": r["comment"], "updated_by": r["updated_by"], "updated_at": r["updated_at"]} for r in rows}
+
+
+@app.put("/api/project-comments/{project_code}")
+async def save_project_comment(project_code: str, request: Request, caller_id: str = ""):
+    from app.database import get_conn
+    import datetime as _dt
+    body = await request.json()
+    comment = body.get("comment", "")
+    # Get username from caller_id
+    with get_conn() as conn:
+        user_row = conn.execute("SELECT username FROM users WHERE id=?", (caller_id,)).fetchone()
+        username = user_row["username"] if user_row else caller_id
+        now = _dt.datetime.utcnow().isoformat()
+        conn.execute(
+            "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) VALUES (?,?,?,?)",
+            (project_code, comment, username, now)
+        )
+    return {"status": "ok"}
+
+
+# ── Project Progress ──────────────────────────────────────────────────────────
+
+@app.get("/api/project-progress")
+def get_project_progress(caller_id: str = ""):
+    from app.database import get_conn
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM project_progress ORDER BY sort_order, project_name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.put("/api/project-progress/{row_id}")
+async def update_project_progress(row_id: str, request: Request, caller_id: str = ""):
+    body = await request.json()
+    allowed_fields = {"project_name","project_code","status","ba","uiux","qc","c_classic","fe","be","due_date","start_date","end_date","sort_order"}
+    updates = {k: v for k, v in body.items() if k in allowed_fields}
+    if not updates:
+        raise HTTPException(400, "No valid fields")
+    from app.database import get_conn
+    with get_conn() as conn:
+        for field, val in updates.items():
+            conn.execute(
+                f"UPDATE project_progress SET {field}=? WHERE id=?", (val, row_id)
+            )
+    return {"status": "ok"}
+
+
+@app.post("/api/project-progress")
+async def add_project_progress(request: Request, caller_id: str = ""):
+    import uuid as _uuid, json as _json
+    body = await request.json()
+    new_id = str(_uuid.uuid4())
+    from app.database import get_conn
+    with get_conn() as conn:
+        max_order = conn.execute("SELECT MAX(sort_order) FROM project_progress").fetchone()[0] or 0
+        conn.execute(
+            "INSERT INTO project_progress (id,project_name,project_code,status,ba,uiux,qc,c_classic,fe,be,due_date,start_date,end_date,sort_order) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (new_id, body.get("project_name","New Project"), body.get("project_code",""),
+             body.get("status",""), body.get("ba",""), body.get("uiux",""), body.get("qc",""),
+             body.get("c_classic",""), body.get("fe",""), body.get("be",""),
+             body.get("due_date",""), body.get("start_date",""), body.get("end_date",""),
+             max_order + 1)
+        )
+    return {"id": new_id}
+
+
+@app.delete("/api/project-progress/{row_id}")
+def delete_project_progress(row_id: str, caller_id: str = ""):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        conn.execute("DELETE FROM project_progress WHERE id=?", (row_id,))
+    return {"status": "ok"}

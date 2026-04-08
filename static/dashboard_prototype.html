@@ -2646,8 +2646,10 @@
           ? Math.round(weighted / totalDur)
           : (rootItem ? Math.round(rootItem.pct) : 0);
 
-        const ss = items.map(t => t.start).sort();
-        const ee = items.map(t => t.end).sort();
+        // Use only non-summary tasks for project start/end so stale summary wrappers don't inflate the dates
+        const nonSummary = items.filter(t => !t.is_summary);
+        const ss = nonSummary.map(t => t.start).filter(Boolean).sort();
+        const ee = nonSummary.map(t => t.end).filter(Boolean).sort();
         const pEnd = ee[ee.length - 1];
         return {
           code: p.code, name: p.name, mpp_path: p.mpp_path || '',
@@ -2955,8 +2957,15 @@
       show_plan_finish: true, show_actual_finish: false,
       show_actual_edit: true,
       show_extended_days: true,
+      show_predecessor: true,
       show_risk_log_btn: true, show_intelligence: true, show_focus: true,
       show_gantt: true, show_audit_log: true,
+      show_action_items: true,
+      // Top-bar modules — default OFF for non-admins
+      topbar_project_ext: false, topbar_project_progress: false,
+      topbar_c2026: false, topbar_standup: false, topbar_report: false,
+      topbar_resources: false, topbar_resource_hub: false,
+      topbar_db: false, topbar_admin: false,
       // UI buttons — default OFF for non-admins
       show_resources_btn: false, show_clone_btn: false, show_report_btn: false,
       show_clear_btn: false, show_export_btn: false,
@@ -2976,16 +2985,29 @@
       { key: 'show_actual_start',    icon: '📅', label: 'Actual Start column', section: 'columns' },
       { key: 'show_plan_finish',     icon: '📅', label: 'Plan Finish column', section: 'columns' },
       { key: 'show_actual_finish',   icon: '📅', label: 'Actual Finish column', section: 'columns' },
-      { key: 'show_actual_edit',     icon: '✎',  label: '✎ Edit Actuals column', section: 'columns' },
+      { key: 'show_actual_edit',     icon: '✎',  label: '✎ Edit Actual Dates column', section: 'columns' },
       { key: 'show_extended_days',   icon: '⏱', label: 'Ext. Days column', section: 'columns' },
-      { key: 'show_risk_log_btn',    icon: '⚠',  label: '⚠ Log Risk/Delay button' },
+      { key: 'show_predecessor',     icon: '🔗', label: 'Predecessor column', section: 'columns' },
+      { key: 'show_risk_log_btn',    icon: '⚠',  label: '⚠ Risk/Delay column' },
       { key: 'show_intelligence',    icon: '🤖', label: '🤖 Project Intelligence panel' },
       { key: 'show_focus',           icon: '🎯', label: '🎯 In Progress — Focus panel' },
       { key: 'show_gantt',           icon: '📊', label: 'Gantt Chart' },
       { key: 'show_audit_log',       icon: '📋', label: 'Audit Log section' },
-      { key: 'show_resources_btn',   icon: '📊', label: '📊 Resources button (top bar)', section: 'buttons' },
+      { key: 'show_action_items',    icon: '✅', label: 'Action Items widget' },
+      // Top-bar module visibility
+      { key: 'topbar_project_ext',      icon: '📋', label: '📋 Project Ext. button', section: 'topbar' },
+      { key: 'topbar_project_progress', icon: '📊', label: '📊 Project Progress button', section: 'topbar' },
+      { key: 'topbar_c2026',            icon: '🏗', label: '🏗 CUBES 2026 button', section: 'topbar' },
+      { key: 'topbar_standup',          icon: '📋', label: '📋 Standup button', section: 'topbar' },
+      { key: 'topbar_report',           icon: '📧', label: '📧 Generate Report button', section: 'topbar' },
+      { key: 'topbar_resources',        icon: '📊', label: '📊 Resources button', section: 'topbar' },
+      { key: 'topbar_resource_hub',     icon: '🗂', label: '🗂 Resource Hub button', section: 'topbar' },
+      { key: 'topbar_db',               icon: '🗄', label: '🗄 DB Viewer button (admin only)', section: 'topbar' },
+      { key: 'topbar_admin',            icon: '👥', label: '👥 Admin Panel button (admin only)', section: 'topbar' },
+      // Sidebar/action buttons
+      { key: 'show_resources_btn',   icon: '📊', label: '📊 Resources chart button', section: 'buttons' },
       { key: 'show_clone_btn',       icon: '📑', label: '📑 Clone Project button', section: 'buttons' },
-      { key: 'show_report_btn',      icon: '📧', label: '📧 Generate Report button', section: 'buttons' },
+      { key: 'show_report_btn',      icon: '📧', label: '📧 Report button (sidebar)', section: 'buttons' },
       { key: 'show_clear_btn',       icon: '✕',  label: 'Clear selection button', section: 'buttons' },
       { key: 'show_export_btn',      icon: '📄', label: 'Export PDF button', section: 'buttons' },
       { key: 'show_new_project_btn', icon: '🚀', label: '🚀 New Project button', section: 'buttons' },
@@ -3048,7 +3070,7 @@
                     </label>
                   </div>
                 ))}
-                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 12, marginBottom: 4 }}>Panels &amp; Buttons</div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 12, marginBottom: 4 }}>Panels &amp; Widgets</div>
                 {SETTING_LABELS.filter(s => !s.section).map(({ key, icon, label }) => (
                   <div key={key} className="ds-toggle-row">
                     <div className="ds-toggle-label">
@@ -3063,7 +3085,23 @@
                     </label>
                   </div>
                 ))}
-                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 12, marginBottom: 4 }}>Button Visibility</div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 12, marginBottom: 4 }}>Top Bar Modules</div>
+                <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 6 }}>Controls which top-bar buttons are visible to this role. DB and Admin are always admin-only.</div>
+                {SETTING_LABELS.filter(s => s.section === 'topbar').map(({ key, icon, label }) => (
+                  <div key={key} className="ds-toggle-row">
+                    <div className="ds-toggle-label">
+                      <span style={{ fontSize: 13 }}>{icon}</span>
+                      <span>{label}</span>
+                    </div>
+                    <label className="ds-toggle">
+                      <input type="checkbox" checked={!!settings[role][key]}
+                        onChange={() => toggle(role, key)} />
+                      <div className="ds-toggle-track" />
+                      <div className="ds-toggle-thumb" />
+                    </label>
+                  </div>
+                ))}
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 12, marginBottom: 4 }}>Sidebar Button Visibility</div>
                 {SETTING_LABELS.filter(s => s.section === 'buttons').map(({ key, icon, label }) => (
                   <div key={key} className="ds-toggle-row">
                     <div className="ds-toggle-label">
@@ -4035,9 +4073,9 @@
       const isEditor = user?.role === 'editor';
       const canComment = isAdmin || isEditor;
 
-      const [comments, setComments] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('execSummaryComments') || '{}'); } catch { return {}; }
-      });
+      // Comments stored in DB — visible to all users
+      const [comments, setComments] = useState({});
+      const [savingComment, setSavingComment] = useState(false);
       const [editingComment, setEditingComment] = useState(null);
       const [commentDraft, setCommentDraft] = useState('');
       const [hiddenProjects, setHiddenProjects] = useState(() => {
@@ -4045,11 +4083,33 @@
       });
       const [showFilter, setShowFilter] = useState(false);
 
-      function saveComment(projectCode, text) {
-        const updated = { ...comments, [projectCode]: text };
-        setComments(updated);
-        localStorage.setItem('execSummaryComments', JSON.stringify(updated));
-        setEditingComment(null);
+      // Load comments from DB on mount
+      useEffect(() => {
+        fetch('/api/project-comments')
+          .then(r => r.json())
+          .then(data => {
+            // data = { projectCode: { comment, updated_by, updated_at }, ... }
+            const flat = {};
+            Object.entries(data).forEach(([code, v]) => { flat[code] = v.comment; });
+            setComments(flat);
+          })
+          .catch(() => {});
+      }, []);
+
+      async function saveComment(projectCode, text) {
+        setSavingComment(true);
+        try {
+          await fetch(`/api/project-comments/${encodeURIComponent(projectCode)}?caller_id=${user?.id || ''}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment: text })
+          });
+          setComments(c => ({ ...c, [projectCode]: text }));
+          setEditingComment(null);
+        } catch (e) {
+          alert('Failed to save comment: ' + e.message);
+        }
+        setSavingComment(false);
       }
 
       function toggleHide(code) {
@@ -4138,21 +4198,29 @@
                       </td>
                       <td style={{ padding: '5px 10px', minWidth: 200 }}>
                         {isEditingThis ? (
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <input autoFocus
-                              style={{ flex: 1, fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none' }}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <textarea autoFocus rows={3}
+                              style={{ flex: 1, fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5 }}
                               value={commentDraft} onChange={e => setCommentDraft(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') saveComment(p.code, commentDraft); if (e.key === 'Escape') setEditingComment(null); }} />
-                            <button onClick={() => saveComment(p.code, commentDraft)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>✓</button>
-                            <button onClick={() => setEditingComment(null)} style={{ padding: '3px 7px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && !e.altKey) { e.preventDefault(); saveComment(p.code, commentDraft); }
+                                if (e.key === 'Enter' && e.altKey) { setCommentDraft(d => d + '\n'); }
+                                if (e.key === 'Escape') setEditingComment(null);
+                              }}
+                              placeholder="Type comment… Alt+Enter for new line, Enter to save" />
+                            <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                              <span style={{ fontSize: 9, color: 'var(--muted)', alignSelf: 'center', flex: 1 }}>Alt+Enter = new line · Enter = save</span>
+                              <button onClick={() => saveComment(p.code, commentDraft)} disabled={savingComment} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>{savingComment ? '…' : '✓ Save'}</button>
+                              <button onClick={() => setEditingComment(null)} style={{ padding: '3px 7px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                            </div>
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 26 }}>
-                            <span style={{ flex: 1, fontSize: 11, color: comment ? 'var(--text)' : 'var(--dim)', fontStyle: comment ? 'normal' : 'italic' }}>
-                              {comment || (canComment ? 'Click to add comment…' : '—')}
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minHeight: 26 }}>
+                            <span style={{ flex: 1, fontSize: 11, color: comment ? 'var(--text)' : 'var(--dim)', fontStyle: comment ? 'normal' : 'italic', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                              {comment || (canComment ? 'Click ✎ to add comment…' : '—')}
                             </span>
-                            {canComment && <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11 }}
-                              onClick={() => { setCommentDraft(comment); setEditingComment(p.code); }} title="Edit comment">✎</span>}
+                            {canComment && <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11, flexShrink: 0, marginTop: 1 }}
+                              onClick={() => { setCommentDraft(comment); setEditingComment(p.code); }} title="Edit comment (Alt+Enter for new line)">✎</span>}
                           </div>
                         )}
                       </td>
@@ -4466,6 +4534,8 @@
           : <span className={`sc ${st.c}`} title={stReason}>{st.l}</span>;
 
       // Actual % — number cell (always shown when show_pct_edit is on)
+      // For the project root row, use the leaf-weighted p.progress (matches the header %)
+      const displayPct = isRoot ? p.progress : Math.round(t.pct);
       const pctNumCell = (
         <td style={{ width: 58, textAlign: 'right', paddingRight: 6 }}>
           {isEditable && editing ? (
@@ -4478,7 +4548,7 @@
             </div>
           ) : (
             <span className="pct-num" style={{ color: isLocked ? 'var(--g)' : bc, fontWeight: 700, fontSize: 12 }}>
-              {Math.round(t.pct)}%
+              {displayPct}%
             </span>
           )}
         </td>
@@ -4549,12 +4619,12 @@
         return Math.round(((TODAY - s) / (e - s)) * 100);
       })();
       // Color: green if actual >= plan, orange if slightly behind, red if very behind
-      const planDelta = Math.round(t.pct) - planPctVal;
+      const planDelta = displayPct - planPctVal;
       const planPctColor = planDelta >= 0 ? 'var(--g)' : planDelta >= -15 ? '#f97316' : 'var(--r)';
       const planPctCell = (
         <td style={{ width: 68, textAlign: 'right', paddingRight: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', ...deactivatedStyle }}
-            title={`Schedule expects ${planPctVal}% by today — actual is ${Math.round(t.pct)}%`}>
+            title={`Schedule expects ${planPctVal}% by today — actual is ${displayPct}%`}>
             {planPctVal}%
           </span>
         </td>
@@ -4586,7 +4656,7 @@
           {sh('show_progress_bar') && <td style={{ width: 60 }}>
             <div className="td-pad">
               <div className="pbar-wrap">
-                <div className="pbar"><div className="pfill" style={{ width: `${t.pct}%`, background: bc }} /></div>
+                <div className="pbar"><div className="pfill" style={{ width: `${displayPct}%`, background: bc }} /></div>
               </div>
             </div>
           </td>}
@@ -5140,6 +5210,32 @@
                 {sh('show_risk_log_btn') && <th style={{ width: 90 }}>Risk/Delay</th>}
               </tr></thead>
               <tbody>
+                {/* ── Project overall summary row (pinned above all phases) ── */}
+                {(() => {
+                  const hc = p.progress;
+                  const hBg  = hc >= 100 ? '#22c55e' : hc >= 60 ? '#6366f1' : hc >= 30 ? '#f59e0b' : '#ef4444';
+                  const colCount = [sh('show_wbs'),sh('show_plan_pct'),sh('show_pct_edit'),sh('show_pct_edit'),sh('show_delay_days'),sh('show_progress_bar'),sh('show_status'),true,sh('show_duration'),sh('show_type_column'),sh('show_plan_start'),sh('show_actual_start'),sh('show_plan_finish'),sh('show_actual_finish'),sh('show_actual_edit'),sh('show_extended_days'),sh('show_predecessor'),sh('show_risk_log_btn')].filter(Boolean).length;
+                  return (
+                    <tr style={{ background:'linear-gradient(90deg,rgba(99,102,241,.09),rgba(99,102,241,.03))', borderBottom:'2px solid rgba(99,102,241,.25)' }}>
+                      <td colSpan={colCount} style={{ padding:'7px 14px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+                          <span style={{ fontWeight:800, fontSize:13, color:'var(--brand)' }}>{p.name}</span>
+                          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                            <div style={{ width:90, height:8, background:'var(--s2)', borderRadius:4, overflow:'hidden' }}>
+                              <div style={{ width:hc+'%', height:'100%', background:hBg, borderRadius:4 }} />
+                            </div>
+                            <span style={{ fontWeight:800, fontSize:12, color:hBg }}>{hc}%</span>
+                          </div>
+                          <span style={{ fontSize:11, color:'var(--muted)' }}>📅 {fmt(p.start)} → {fmt(p.end)}</span>
+                          <span className={`rag rag-${p.health}`} style={{ fontSize:10 }}>{p.health === 'G' ? 'On Track' : p.health === 'A' ? 'At Risk' : 'Delayed'}</span>
+                          <span style={{ fontSize:10, color:'var(--muted)', marginLeft:'auto' }}>
+                            {taskCount} tasks · {summaryCount} summaries · {msCount} milestones
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()}
                 {visItems.map((t, idx) => (
                   <TaskRow key={idx} t={t} p={p} idx={idx} totalRows={visItems.length}
                     onSaved={onSaved} onToast={onToast} user={user}
@@ -6477,6 +6573,192 @@
     }
 
     // ── PROJECT EXTENSION MODAL ──────────────────────────────────────
+    // ── Project Progress Modal ─────────────────────────────────────────────────
+    function ProjectProgress({ user, projects: liveProjects, onClose }) {
+      const [rows, setRows] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [editId, setEditId] = useState(null);
+      const [editData, setEditData] = useState({});
+      const [saving, setSaving] = useState(false);
+      const canEdit = user && (user.role === 'admin' || user.role === 'editor');
+
+      useEffect(() => {
+        fetch(`/api/project-progress?caller_id=${user?.id || ''}`)
+          .then(r => r.json()).then(d => { setRows(d); setLoading(false); })
+          .catch(() => setLoading(false));
+      }, []);
+
+      function startEdit(row) {
+        setEditId(row.id);
+        setEditData({ ...row });
+      }
+
+      async function saveEdit() {
+        setSaving(true);
+        try {
+          const r = await fetch(`/api/project-progress/${editId}?caller_id=${user?.id || ''}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(editData)
+          });
+          if (!r.ok) throw new Error('save failed');
+          setRows(rows.map(r2 => r2.id === editId ? { ...r2, ...editData } : r2));
+          setEditId(null);
+        } catch(e) { alert('Save failed: ' + e.message); }
+        setSaving(false);
+      }
+
+      async function addRow() {
+        const r = await fetch(`/api/project-progress?caller_id=${user?.id || ''}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_name: 'New Project' })
+        });
+        const d = await r.json();
+        const newRow = { id: d.id, project_name: 'New Project', project_code: '', status: '',
+          ba: '', uiux: '', qc: '', c_classic: '', fe: '', be: '', due_date: '', start_date: '', end_date: '', sort_order: rows.length + 1 };
+        setRows([...rows, newRow]);
+        startEdit(newRow);
+      }
+
+      async function deleteRow(id) {
+        if (!confirm('Delete this row?')) return;
+        await fetch(`/api/project-progress/${id}?caller_id=${user?.id || ''}`, { method: 'DELETE' });
+        setRows(rows.filter(r => r.id !== id));
+      }
+
+      // Try auto-populate from live project data
+      function autoFill(row) {
+        const code = (editData.project_code || '').trim().toUpperCase();
+        if (!code) return;
+        const match = (liveProjects || []).find(p => (p.code || '').toUpperCase() === code || (p.name || '').toUpperCase().includes(code));
+        if (!match) { alert(`No project found with code "${code}"`); return; }
+        setEditData(ed => ({
+          ...ed,
+          project_name: match.name || ed.project_name,
+          start_date: match.start || ed.start_date,
+          end_date: match.end || ed.end_date,
+        }));
+      }
+
+      const COLS = [
+        { key: 'project_name', label: 'Project', wide: true },
+        { key: 'project_code', label: 'Code' },
+        { key: 'status',       label: 'Status',  wide: true },
+        { key: 'ba',           label: 'BA' },
+        { key: 'uiux',         label: 'UI/UX' },
+        { key: 'qc',           label: 'QC' },
+        { key: 'c_classic',    label: 'C-Classic' },
+        { key: 'fe',           label: 'FE' },
+        { key: 'be',           label: 'BE' },
+        { key: 'due_date',     label: 'Due Date', isDate: true },
+        { key: 'start_date',   label: 'Start',    isDate: true },
+        { key: 'end_date',     label: 'End',      isDate: true },
+      ];
+
+      function fmtD(s) {
+        if (!s) return '—';
+        try { return new Date(s).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+        catch { return s; }
+      }
+
+      return (
+        <div style={{ position:'fixed', inset:0, zIndex:2000, background:'rgba(0,0,0,.45)', display:'flex', alignItems:'flex-start', justifyContent:'center', paddingTop:60, overflowY:'auto' }}>
+          <div style={{ background:'var(--s1)', border:'1px solid var(--border)', borderRadius:16, width:'98vw', maxWidth:1360, minHeight:400, boxShadow:'0 16px 64px rgba(0,0,0,.35)', padding:0, overflow:'hidden', marginBottom:40 }}>
+            {/* Header */}
+            <div style={{ background:'linear-gradient(135deg,rgba(6,182,212,.12),rgba(14,165,233,.06))', borderBottom:'1px solid rgba(6,182,212,.25)', padding:'16px 24px', display:'flex', alignItems:'center', gap:12 }}>
+              <span style={{ fontSize:22 }}>📊</span>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:800, fontSize:16, color:'var(--fg)' }}>Project Progress</div>
+                <div style={{ fontSize:11, color:'var(--muted)', marginTop:1 }}>Live status board — manual updates + auto-linked from project data</div>
+              </div>
+              {canEdit && (
+                <button onClick={addRow} style={{ background:'rgba(6,182,212,.12)', border:'1px solid rgba(6,182,212,.35)', borderRadius:8, padding:'6px 16px', cursor:'pointer', color:'#0891b2', fontWeight:700, fontSize:12 }}>+ Add Row</button>
+              )}
+              <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', fontSize:22, color:'var(--muted)', lineHeight:1, padding:4 }}>×</button>
+            </div>
+
+            {/* Table */}
+            <div style={{ overflowX:'auto', padding:'16px 12px' }}>
+              {loading ? <div style={{ padding:40, textAlign:'center', color:'var(--muted)' }}>Loading…</div> : (
+                <table style={{ borderCollapse:'collapse', width:'100%', minWidth:1100, fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:'var(--s2)', borderBottom:'2px solid var(--border)' }}>
+                      {COLS.map(c => (
+                        <th key={c.key} style={{ padding:'8px 10px', textAlign:'left', whiteSpace:'nowrap', color:'var(--muted)', fontWeight:700, fontSize:11, minWidth: c.wide ? 160 : c.isDate ? 95 : 70 }}>
+                          {c.label}
+                        </th>
+                      ))}
+                      {canEdit && <th style={{ width:80 }} />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, ri) => {
+                      const isEditing = editId === row.id;
+                      const base = isEditing ? editData : row;
+                      return (
+                        <tr key={row.id} style={{ borderBottom:'1px solid var(--border)', background: ri%2===0 ? 'transparent' : 'rgba(0,0,0,.018)', transition:'background .15s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(6,182,212,.04)'}
+                          onMouseLeave={e => e.currentTarget.style.background = ri%2===0 ? 'transparent' : 'rgba(0,0,0,.018)'}>
+                          {COLS.map(c => (
+                            <td key={c.key} style={{ padding:'6px 10px', verticalAlign:'top' }}>
+                              {isEditing ? (
+                                <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+                                  <input
+                                    type={c.isDate ? 'date' : 'text'}
+                                    value={editData[c.key] || ''}
+                                    onChange={e => setEditData(ed => ({ ...ed, [c.key]: e.target.value }))}
+                                    style={{ width:'100%', background:'var(--s2)', border:'1px solid rgba(6,182,212,.4)', borderRadius:4, padding:'3px 6px', color:'var(--fg)', fontSize:11 }}
+                                  />
+                                  {c.key === 'project_code' && (
+                                    <button onClick={() => autoFill(row)} title="Auto-fill from project" style={{ background:'rgba(6,182,212,.12)', border:'none', borderRadius:4, padding:'3px 6px', cursor:'pointer', color:'#0891b2', fontSize:10, whiteSpace:'nowrap' }}>↓ Fill</button>
+                                  )}
+                                </div>
+                              ) : (
+                                <span style={{ color: c.key==='project_name' ? 'var(--fg)' : c.key==='status' ? 'var(--fg)' : 'var(--muted)',
+                                               fontWeight: c.key==='project_name' ? 700 : 400,
+                                               fontSize: c.isDate ? 11 : 12,
+                                               whiteSpace: c.key==='status' ? 'normal' : 'nowrap' }}>
+                                  {c.isDate ? fmtD(base[c.key]) : (base[c.key] || '—')}
+                                </span>
+                              )}
+                            </td>
+                          ))}
+                          {canEdit && (
+                            <td style={{ padding:'6px 8px', whiteSpace:'nowrap' }}>
+                              {isEditing ? (
+                                <div style={{ display:'flex', gap:4 }}>
+                                  <button onClick={saveEdit} disabled={saving} style={{ background:'rgba(34,197,94,.12)', border:'1px solid rgba(34,197,94,.3)', borderRadius:5, padding:'3px 10px', cursor:'pointer', color:'#16a34a', fontWeight:700, fontSize:11 }}>{saving ? '…' : '✓'}</button>
+                                  <button onClick={() => setEditId(null)} style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.2)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'#ef4444', fontWeight:700, fontSize:11 }}>×</button>
+                                </div>
+                              ) : (
+                                <div style={{ display:'flex', gap:4 }}>
+                                  <button onClick={() => startEdit(row)} style={{ background:'rgba(99,102,241,.1)', border:'1px solid rgba(99,102,241,.25)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'var(--brand)', fontSize:11 }}>✎</button>
+                                  {user?.role === 'admin' && (
+                                    <button onClick={() => deleteRow(row.id)} style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.2)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'#ef4444', fontSize:11 }}>🗑</button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                    {rows.length === 0 && (
+                      <tr><td colSpan={COLS.length + 1} style={{ padding:32, textAlign:'center', color:'var(--muted)' }}>No projects added yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer note */}
+            <div style={{ borderTop:'1px solid var(--border)', padding:'10px 24px', background:'rgba(6,182,212,.03)', display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontSize:10, color:'var(--muted)' }}>💡 Editors can update all rows. Use <strong>project_code</strong> to auto-link data from an existing project. Admins can add/delete rows.</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function ProjectExtension({ user, onClose }) {
       const [projects, setProjects] = useState([]);
       const [allProducts, setAllProducts] = useState([]);
@@ -8839,6 +9121,7 @@
       const [ganttMode, setGanttMode] = React.useState('quarterly');
       const [ganttExpanded, setGanttExpanded] = React.useState({});
       const [summaryExpanded, setSummaryExpanded] = React.useState({});
+      const [notePopup, setNotePopup] = React.useState(null); // {name, note, x, y}
       const uid = () => 'id_' + Math.random().toString(36).slice(2,10);
 
       React.useEffect(() => {
@@ -8852,25 +9135,133 @@
         try { await api.saveC2026(user.id, plan); setSavedOk(true); setTimeout(() => setSavedOk(false), 2500); } finally { setSaving(false); }
       }
 
-      // ─── Date auto-calc (triangle: 2 known → compute 3rd) ────────
-      function addCalDays(dateStr, n) {
-        const d = new Date(dateStr); d.setDate(d.getDate() + Math.round(n));
+      // ─── Jordan working-day helpers ────────────────────────────
+      const JO_HOLIDAYS = new Set([
+        '2026-01-01','2026-01-27',
+        '2026-03-20','2026-03-21','2026-03-22',  // Eid Al-Fitr
+        '2026-05-25',                              // Independence Day
+        '2026-05-27','2026-05-28',                 // Eid Al-Adha
+        '2026-06-10',                              // Army Day
+        '2026-06-18',                              // Islamic New Year
+        '2026-08-25',                              // Prophet Birthday
+        '2026-12-25',                              // Christmas
+        // 2025 holidays
+        '2025-01-01','2025-01-27','2025-03-31','2025-04-01','2025-04-02',
+        '2025-05-01','2025-05-25','2025-06-07','2025-06-08','2025-06-09',
+        '2025-06-25','2025-07-04','2025-09-05','2025-12-25',
+      ]);
+      function isWorkDay(d) {
+        // Sun=0..Sat=6 ; skip Fri(5) and Sat(6)
+        const day = d.getDay();
+        if (day === 5 || day === 6) return false;
+        const key = d.toISOString().split('T')[0];
+        return !JO_HOLIDAYS.has(key);
+      }
+      function addWorkDays(dateStr, n) {
+        if (!dateStr || n == null) return null;
+        const d = new Date(dateStr + 'T00:00:00');
+        let rem = Math.abs(Math.round(n));
+        const dir = n < 0 ? -1 : 1;
+        while (rem > 0) {
+          d.setDate(d.getDate() + dir);
+          if (isWorkDay(d)) rem--;
+        }
         return d.toISOString().split('T')[0];
       }
-      function diffCalDays(s, e) {
-        return Math.max(1, Math.round((new Date(e) - new Date(s)) / 86400000));
+      function nextWorkDay(dateStr) {
+        if (!dateStr) return null;
+        const d = new Date(dateStr + 'T00:00:00');
+        d.setDate(d.getDate() + 1);
+        while (!isWorkDay(d)) d.setDate(d.getDate() + 1);
+        return d.toISOString().split('T')[0];
       }
-      function autoCalc(row) {
+      function diffWorkDays(s, e) {
+        if (!s || !e) return null;
+        let d = new Date(s + 'T00:00:00');
+        const end = new Date(e + 'T00:00:00');
+        let count = 0;
+        while (d <= end) { if (isWorkDay(d)) count++; d.setDate(d.getDate() + 1); }
+        return Math.max(1, count);
+      }
+
+      // ─── Dependency helpers ───────────────────────────────────
+      function rowCode(pi, phi, team) {
+        // e.g. P1.Ph1.BA  or  P2.Ph1.UIUX
+        const t = team.replace(/\//g,'').replace(/\s+/g,'');
+        return `P${pi+1}.Ph${phi+1}.${t}`;
+      }
+      function buildCodeMap(planData) {
+        const map = {};
+        (planData.projects || []).forEach((proj, pi) => {
+          (proj.phases || []).forEach((ph, phi) => {
+            (ph.team_rows || []).forEach(row => {
+              map[rowCode(pi, phi, row.team)] = row;
+            });
+          });
+        });
+        return map;
+      }
+      function resolveDepStart(row, codeMap) {
+        // Returns auto-start string from depends_on, or null if unresolvable
+        const deps = row.depends_on;
+        if (!deps || !deps.length) return null;
+        let latest = null;
+        for (const dep of deps) {
+          const ref = codeMap[dep.ref];
+          if (!ref) continue;
+          let calcStart = null;
+          if (dep.type === 'SS') {
+            calcStart = ref.start ? addWorkDays(ref.start, dep.lag || 0) : null;
+          } else { // FS (default)
+            // Use stored end; if missing, compute from start + days on-the-fly
+            let refEnd = ref.end || null;
+            if (!refEnd && ref.start && ref.days) {
+              refEnd = addWorkDays(ref.start, ref.days - 1);
+            }
+            calcStart = refEnd ? nextWorkDay(refEnd) : null;
+            if (calcStart && dep.lag) calcStart = addWorkDays(calcStart, dep.lag);
+          }
+          if (calcStart && (!latest || calcStart > latest)) latest = calcStart;
+        }
+        return latest;
+      }
+
+      // ─── Date auto-calc: changedField tells us which value the user just set ──
+      // Priority rules:
+      //   days changed  → recompute end from start + days (always, even if end existed)
+      //   start changed → recompute end from start + days (if days known)
+      //   end changed   → recompute days from start ↔ end
+      function autoCalc(row, codeMap, changedField) {
+        // Dependency overrides start (unless the user just manually set start)
+        if (codeMap && changedField !== 'start') {
+          const depStart = resolveDepStart(row, codeMap);
+          if (depStart) row.start = depStart;
+        }
         const hasS = !!row.start, hasE = !!row.end, hasD = row.days != null && row.days > 0;
-        if (hasD && hasS) { row.end = addCalDays(row.start, row.days); }
-        else if (hasS && hasE && !hasD) { row.days = diffCalDays(row.start, row.end); }
-        else if (hasD && hasE && !hasS) { row.start = addCalDays(row.end, -row.days); }
+        if (changedField === 'days' || changedField === 'start') {
+          // User set days or start → always compute end
+          if (hasD && hasS) { row.end = addWorkDays(row.start, row.days - 1); }
+          else if (hasD && hasE) { row.start = addWorkDays(row.end, -(row.days - 1)); }
+        } else if (changedField === 'end') {
+          // User set end → recompute days
+          if (hasS && hasE) { row.days = diffWorkDays(row.start, row.end); }
+        } else {
+          // No hint (initial load): fill missing third value
+          if (hasD && hasS && !hasE) { row.end = addWorkDays(row.start, row.days - 1); }
+          else if (hasS && hasE && !hasD) { row.days = diffWorkDays(row.start, row.end); }
+          else if (hasD && hasE && !hasS) { row.start = addWorkDays(row.end, -(row.days - 1)); }
+        }
       }
       function updateTeamRow(pi, phi, ri, field, val) {
-        update(n => { const r = n.projects[pi].phases[phi].team_rows[ri]; r[field] = val; autoCalc(r); });
+        update(n => {
+          const r = n.projects[pi].phases[phi].team_rows[ri];
+          r[field] = val;
+          const cm = buildCodeMap(n);
+          autoCalc(r, cm, field);
+        });
       }
       function updateRelease(pi, phi, ri, field, val) {
-        update(n => { const r = n.projects[pi].phases[phi].releases[ri]; r[field] = val; autoCalc(r); });
+        update(n => { const r = n.projects[pi].phases[phi].releases[ri]; r[field] = val; autoCalc(r, null); });
       }
 
       function calcPhasePct(phase) {
@@ -9040,12 +9431,14 @@
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead>
                   <tr style={{ background:'var(--s2)', fontSize:10, textTransform:'uppercase', color:'var(--muted)', letterSpacing:'.05em' }}>
-                    <th style={{ padding:'7px 12px', textAlign:'left', minWidth:110 }}>Team / Version</th>
-                    <th style={{ padding:'7px 12px', minWidth:160 }}>Status</th>
-                    <th style={{ padding:'7px 8px', textAlign:'center', width:65 }}>%</th>
-                    <th style={{ padding:'7px 8px', textAlign:'center', width:65 }}>Days</th>
-                    <th style={{ padding:'7px 8px', textAlign:'center', width:120 }}>Start</th>
-                    <th style={{ padding:'7px 8px', textAlign:'center', width:140 }}>End <span style={{ fontSize:9, color:'#6366f1', fontWeight:600 }}>⟵ auto</span></th>
+                    <th style={{ padding:'7px 12px', textAlign:'left', minWidth:130 }}>Team / Code</th>
+                    <th style={{ padding:'7px 12px', minWidth:150 }}>Status</th>
+                    <th style={{ padding:'7px 8px', textAlign:'center', width:55 }}>%</th>
+                    <th style={{ padding:'7px 8px', textAlign:'center', width:48 }}>Wks<br/><span style={{ fontSize:8, color:'#22c55e', fontWeight:400, textTransform:'none' }}>→days</span></th>
+                    <th style={{ padding:'7px 8px', textAlign:'center', width:55 }}>Days<br/><span style={{ fontSize:8, color:'#6366f1', fontWeight:400, textTransform:'none' }}>working</span></th>
+                    <th style={{ padding:'7px 8px', textAlign:'left', minWidth:220 }}>Depends On <span style={{ fontSize:9, color:'#f59e0b', fontWeight:600 }}>↗</span></th>
+                    <th style={{ padding:'7px 8px', textAlign:'center', width:105 }}>Start</th>
+                    <th style={{ padding:'7px 8px', textAlign:'center', width:130 }}>End <span style={{ fontSize:9, color:'#6366f1', fontWeight:600 }}>⟵ auto</span></th>
                     {canEdit && <th style={{ width:36 }} />}
                   </tr>
                 </thead>
@@ -9056,7 +9449,7 @@
                       <React.Fragment key={phase.id}>
                         {/* Phase group header row */}
                         <tr style={{ background:'rgba(99,102,241,.07)', borderTop:'2px solid rgba(99,102,241,.18)' }}>
-                          <td colSpan={canEdit ? 7 : 6} style={{ padding:'6px 12px' }}>
+                          <td colSpan={canEdit ? 9 : 8} style={{ padding:'6px 12px' }}>
                             <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                               <span style={{ fontSize:10, fontWeight:800, color:'var(--brand)', background:'rgba(99,102,241,.12)', padding:'1px 7px', borderRadius:10 }}>Phase {phi+1}</span>
                               {canEdit
@@ -9086,15 +9479,27 @@
                         </tr>
                         {/* Team rows */}
                         {phase.team_rows.map((row, ri) => {
-                          const endAuto = row.days != null && !!row.start;
+                          const codeMapNow = buildCodeMap(plan);
+                          const depStart = resolveDepStart(row, codeMapNow);
+                          const startIsAuto = !!(row.depends_on && row.depends_on.length && depStart);
+                          const endAuto = row.days != null && !!(startIsAuto ? depStart : row.start);
+                          const code = rowCode(pi, phi, row.team);
+                          const deps = row.depends_on || [];
+                          // All available codes for dropdown (exclude self)
+                          const allCodes = Object.keys(codeMapNow).filter(c => c !== code);
                           return (
-                            <tr key={row.id} style={{ borderTop:'1px solid var(--border)', background:ri%2===0?'transparent':'rgba(0,0,0,.01)' }}>
-                              <td style={{ padding:'5px 12px', fontWeight:700 }}>
-                                {canEdit
-                                  ? <input value={row.team} onChange={e => update(n => { n.projects[pi].phases[phi].team_rows[ri].team = e.target.value; })}
-                                      style={{ width:90, background:'transparent', border:'none', outline:'none', fontWeight:700, color:'var(--fg)', fontSize:12 }} />
-                                  : row.team}
+                            <tr key={row.id} style={{ borderTop:'1px solid var(--border)', background:ri%2===0?'transparent':'rgba(0,0,0,.015)' }}>
+                              {/* Team + code */}
+                              <td style={{ padding:'5px 12px' }}>
+                                <div style={{ fontWeight:700, fontSize:12, color:'var(--fg)' }}>
+                                  {canEdit
+                                    ? <input value={row.team} onChange={e => update(n => { n.projects[pi].phases[phi].team_rows[ri].team = e.target.value; })}
+                                        style={{ width:80, background:'transparent', border:'none', outline:'none', fontWeight:700, color:'var(--fg)', fontSize:12 }} />
+                                    : row.team}
+                                </div>
+                                <div style={{ fontSize:9, color:'var(--brand)', fontWeight:700, letterSpacing:'.03em', marginTop:1, opacity:.7 }}>{code}</div>
                               </td>
+                              {/* Status */}
                               <td style={{ padding:'4px 8px' }}>
                                 {canEdit
                                   ? <select value={row.status||'TBD'} onChange={e => updateTeamRow(pi,phi,ri,'status',e.target.value)}
@@ -9103,29 +9508,80 @@
                                     </select>
                                   : <span style={{ fontSize:10, padding:'2px 8px', borderRadius:10, background:statusColor(row.status)+'22', color:statusColor(row.status), fontWeight:600 }}>{row.status||'TBD'}</span>}
                               </td>
+                              {/* % */}
                               <td style={{ padding:'4px 4px', textAlign:'center' }}>
                                 {canEdit
                                   ? <input type="number" defaultValue={row.pct??''} key={row.id+'_pct_'+row.pct} placeholder="%" min="0" max="100"
                                       onBlur={e => { const v=e.target.value.trim(); updateTeamRow(pi,phi,ri,'pct',v===''?null:parseFloat(v)); }}
                                       onKeyDown={e => e.key==='Enter'&&e.target.blur()}
-                                      style={{ width:52, background:row.pct==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.pct==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.pct==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
-                                  : <span style={{ fontWeight:700, color:row.pct==null?'#94a3b8':phaseColor(row.pct) }}>{row.pct!=null?row.pct+'%':'TBD'}</span>}
+                                      style={{ width:46, background:row.pct==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.pct==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.pct==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
+                                  : <span style={{ fontWeight:700, color:row.pct==null?'#94a3b8':phaseColor(row.pct) }}>{row.pct!=null?row.pct+'%':'—'}</span>}
                               </td>
+                              {/* Weeks (auto-converts to days) */}
                               <td style={{ padding:'4px 4px', textAlign:'center' }}>
                                 {canEdit
-                                  ? <input type="number" defaultValue={row.days??''} key={row.id+'_days_'+row.days} placeholder="TBD" min="0"
+                                  ? <input type="number" defaultValue={row.days!=null ? Math.round(row.days/5) : ''} key={row.id+'_wks_'+row.days} placeholder="—" min="0" step="0.5"
+                                      title="Enter weeks → auto-converts to working days"
+                                      onBlur={e => { const v=e.target.value.trim(); if(v!=='') updateTeamRow(pi,phi,ri,'days', Math.round(parseFloat(v)*5)); }}
+                                      onKeyDown={e => e.key==='Enter'&&e.target.blur()}
+                                      style={{ width:40, background:'rgba(34,197,94,.06)', border:'1px dashed rgba(34,197,94,.4)', borderRadius:4, padding:'3px 4px', color:'#16a34a', fontSize:11, textAlign:'center' }} />
+                                  : <span style={{ color:row.days==null?'#94a3b8':'#16a34a', fontWeight:row.days!=null?600:400 }}>{row.days!=null?Math.round(row.days/5)+'w':'—'}</span>}
+                              </td>
+                              {/* Days (working) */}
+                              <td style={{ padding:'4px 4px', textAlign:'center' }}>
+                                {canEdit
+                                  ? <input type="number" defaultValue={row.days??''} key={row.id+'_days_'+row.days} placeholder="—" min="0"
                                       onBlur={e => { const v=e.target.value.trim(); updateTeamRow(pi,phi,ri,'days',v===''?null:parseFloat(v)); }}
                                       onKeyDown={e => e.key==='Enter'&&e.target.blur()}
-                                      style={{ width:52, background:row.days==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.days==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.days==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
-                                  : <span style={{ color:row.days==null?'#94a3b8':'var(--fg)' }}>{row.days??'TBD'}</span>}
+                                      style={{ width:46, background:row.days==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.days==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.days==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
+                                  : <span style={{ color:row.days==null?'#94a3b8':'var(--fg)', fontWeight:row.days!=null?600:400 }}>{row.days??'—'}</span>}
                               </td>
+                              {/* Depends On */}
+                              <td style={{ padding:'4px 8px', minWidth:200 }}>
+                                <div style={{ display:'flex', flexWrap:'wrap', gap:3, alignItems:'center' }}>
+                                  {deps.map((dep, di) => (
+                                    <span key={di} style={{ display:'inline-flex', alignItems:'center', gap:3, fontSize:10, background:'rgba(245,158,11,.12)', color:'#b45309', border:'1px solid rgba(245,158,11,.3)', borderRadius:10, padding:'1px 7px', fontWeight:700, whiteSpace:'nowrap' }}>
+                                      <span style={{ color:'var(--muted)', fontWeight:400 }}>{dep.type||'FS'}</span>
+                                      <span style={{ margin:'0 2px' }}>↗</span>
+                                      {dep.ref}
+                                      {canEdit && <span onClick={() => update(n => { n.projects[pi].phases[phi].team_rows[ri].depends_on.splice(di,1); })} style={{ cursor:'pointer', color:'#ef4444', marginLeft:3, fontWeight:700 }}>×</span>}
+                                    </span>
+                                  ))}
+                                  {canEdit && (
+                                    <select
+                                      value=""
+                                      onChange={e => {
+                                        const ref = e.target.value;
+                                        if (!ref) return;
+                                        update(n => {
+                                          const r = n.projects[pi].phases[phi].team_rows[ri];
+                                          if (!r.depends_on) r.depends_on = [];
+                                          if (!r.depends_on.find(d => d.ref === ref)) {
+                                            r.depends_on.push({ ref, type:'FS', lag:0 });
+                                          }
+                                          const cm = buildCodeMap(n);
+                                          autoCalc(r, cm);
+                                        });
+                                      }}
+                                      style={{ fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px dashed #f59e0b', background:'rgba(245,158,11,.06)', color:'#b45309', cursor:'pointer', maxWidth:120 }}>
+                                      <option value="">+ Add dep…</option>
+                                      {allCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  )}
+                                  {!deps.length && !canEdit && <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>}
+                                </div>
+                              </td>
+                              {/* Start (auto from dep or manual) */}
                               <td style={{ padding:'4px 4px', textAlign:'center' }}>
-                                {canEdit
-                                  ? <input type="date" defaultValue={row.start??''} key={row.id+'_start_'+row.start}
-                                      onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'start',v===''?null:v); }}
-                                      style={{ background:row.start==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.start==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.start==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                  : <span style={{ color:row.start==null?'#94a3b8':'var(--fg)' }}>{row.start?fmt(row.start):'TBD'}</span>}
+                                {startIsAuto
+                                  ? <span style={{ color:'#f59e0b', fontWeight:600, fontSize:11, whiteSpace:'nowrap' }} title="Auto-calculated from dependency">{depStart} ↗</span>
+                                  : canEdit
+                                    ? <input type="date" defaultValue={row.start??''} key={row.id+'_start_'+row.start}
+                                        onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'start',v===''?null:v); }}
+                                        style={{ background:row.start==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.start==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.start==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
+                                    : <span style={{ color:row.start==null?'#94a3b8':'var(--fg)' }}>{row.start?fmt(row.start):'—'}</span>}
                               </td>
+                              {/* End (auto from start+days) */}
                               <td style={{ padding:'4px 8px', textAlign:'center' }}>
                                 {endAuto
                                   ? <span style={{ color:'#6366f1', fontWeight:600, fontSize:11, whiteSpace:'nowrap' }}>{row.end?fmt(row.end):'—'} ⟵</span>
@@ -9133,7 +9589,7 @@
                                     ? <input type="date" defaultValue={row.end??''} key={row.id+'_end_'+row.end}
                                         onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'end',v===''?null:v); }}
                                         style={{ background:row.end==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.end==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.end==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                    : <span style={{ color:row.end==null?'#94a3b8':'var(--fg)' }}>{row.end?fmt(row.end):'TBD'}</span>}
+                                    : <span style={{ color:row.end==null?'#94a3b8':'var(--fg)' }}>{row.end?fmt(row.end):'—'}</span>}
                               </td>
                               {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => update(n => { n.projects[pi].phases[phi].team_rows.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
                             </tr>
@@ -9151,7 +9607,7 @@
                                       style={{ background:'transparent', border:'none', outline:'none', fontWeight:700, color:'#b45309', fontSize:12, width:130 }} />
                                   : rel.name}
                               </td>
-                              <td /><td />
+                              <td /><td /><td /><td />
                               <td style={{ padding:'4px 4px', textAlign:'center' }}>
                                 {canEdit
                                   ? <input type="number" defaultValue={rel.days??''} key={rel.id+'_days_'+rel.days} placeholder="TBD" min="0"
@@ -9323,25 +9779,58 @@
                   {/* Project rows */}
                   {plan.projects.map((proj, pi) => {
                     const projPct = calcProjectPct(proj);
-                    let allS=[], allE=[];
+                    // For start: earliest start across all phases
+                    let allS=[];
                     proj.phases.forEach(ph => {
-                      ph.team_rows.forEach(r => { if(r.start) allS.push(r.start); if(r.end) allE.push(r.end); });
-                      ph.releases.forEach(r => { if(r.start) allS.push(r.start); if(r.end) allE.push(r.end); });
+                      ph.team_rows.forEach(r => { if(r.start) allS.push(r.start); });
+                      ph.releases.forEach(r => { if(r.start) allS.push(r.start); });
                     });
+                    // For end: use manual override OR latest end in the LAST phase only
+                    // (avoids Phase 1 FE long-running tasks inflating the project end)
                     const projStart = allS.length ? allS.sort()[0] : null;
-                    const projEnd = allE.length ? allE.sort().reverse()[0] : null;
+                    let projEnd = proj.target_end || null;
+                    if (!projEnd && proj.phases.length) {
+                      const lastPh = proj.phases[proj.phases.length - 1];
+                      let lastPhE = [];
+                      lastPh.team_rows.forEach(r => { if(r.end) lastPhE.push(r.end); });
+                      lastPh.releases.forEach(r => { if(r.end) lastPhE.push(r.end); });
+                      if (!lastPhE.length) {
+                        // Fallback: use latest end across all phases
+                        proj.phases.forEach(ph => {
+                          ph.team_rows.forEach(r => { if(r.end) lastPhE.push(r.end); });
+                          ph.releases.forEach(r => { if(r.end) lastPhE.push(r.end); });
+                        });
+                      }
+                      projEnd = lastPhE.length ? lastPhE.sort().reverse()[0] : null;
+                    }
                     const bp = barPos(projStart, projEnd, cols);
                     const isExpanded = !!ganttExpanded[proj.id];
                     return (
                       <React.Fragment key={proj.id}>
                         {/* Project row */}
                         <div style={{ display:'flex', alignItems:'stretch', borderBottom:'1px solid var(--border)', background:pi%2===0?'transparent':'rgba(0,0,0,.01)' }}>
-                          <div style={{ width:210, flexShrink:0, display:'flex', alignItems:'center', gap:6, padding:'6px 10px', borderRight:'1px solid var(--border)', cursor:'pointer' }}
-                            onClick={() => setGanttExpanded(g => ({ ...g, [proj.id]: !g[proj.id] }))}>
-                            <span style={{ fontSize:9, color:'var(--muted)', width:10 }}>{isExpanded?'▼':'▶'}</span>
-                            <div style={{ overflow:'hidden' }}>
+                          <div style={{ width:210, flexShrink:0, display:'flex', alignItems:'center', gap:6, padding:'6px 10px', borderRight:'1px solid var(--border)' }}>
+                            <span style={{ fontSize:9, color:'var(--muted)', width:10, cursor:'pointer', flexShrink:0 }}
+                              onClick={() => setGanttExpanded(g => ({ ...g, [proj.id]: !g[proj.id] }))}>{isExpanded?'▼':'▶'}</span>
+                            <div style={{ overflow:'hidden', flex:1 }} onClick={() => setGanttExpanded(g => ({ ...g, [proj.id]: !g[proj.id] }))}>
                               <div style={{ fontSize:11, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--fg)', maxWidth:170 }}>{proj.name}</div>
                               <div style={{ fontSize:10, fontWeight:600, color:phaseColor(projPct) }}>{projPct!=null?projPct+'%':'TBD — click to fill'}</div>
+                            </div>
+                            <div title={canEdit ? "Click to override project end date" : "Calculated end date"} style={{ flexShrink:0 }}>
+                              {canEdit ? (
+                                <label style={{ cursor:'pointer', position:'relative', display:'flex', alignItems:'center' }}>
+                                  <input type="date" value={proj.target_end||''} onClick={e => e.stopPropagation()}
+                                    onChange={e => { e.stopPropagation(); update(n => { n.projects[pi].target_end = e.target.value || null; }); }}
+                                    style={{ position:'absolute', opacity:0, width:'100%', height:'100%', cursor:'pointer', top:0, left:0, zIndex:2 }} />
+                                  <span style={{ fontSize:9, color: proj.target_end ? '#f59e0b' : '#6366f1', fontWeight:700, whiteSpace:'nowrap', background: proj.target_end ? 'rgba(245,158,11,.1)' : 'rgba(99,102,241,.08)', border:`1px solid ${proj.target_end?'rgba(245,158,11,.3)':'rgba(99,102,241,.2)'}`, borderRadius:4, padding:'1px 5px' }}>
+                                    ✎ {projEnd ? fmt(projEnd) : 'set end'}
+                                  </span>
+                                </label>
+                              ) : (
+                                <span style={{ fontSize:9, color:'#6366f1', fontWeight:700, whiteSpace:'nowrap', background:'rgba(99,102,241,.08)', border:'1px solid rgba(99,102,241,.2)', borderRadius:4, padding:'1px 5px' }}>
+                                  {projEnd ? fmt(projEnd) : '—'}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div style={{ flex:1, position:'relative', height:44 }}>
@@ -9417,7 +9906,7 @@
                 <thead>
                   <tr style={{ background:'var(--s2)', fontSize:10, textTransform:'uppercase', color:'var(--muted)', letterSpacing:'.05em' }}>
                     <th style={{ padding:'7px 8px', width:28 }} />
-                    {['#','Project','Description','Phases','Overall %','Start','End'].map(h => (
+                    {['#','Project','Description','Phases','Overall %','Start','End','Note'].map(h => (
                       <th key={h} style={{ padding:'7px 12px', textAlign:h==='Phases'||h==='Overall %'?'center':'left', fontWeight:700 }}>{h}</th>
                     ))}
                   </tr>
@@ -9453,11 +9942,21 @@
                           </td>
                           <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>{eS?fmt(eS):'—'}</td>
                           <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>{lE?fmt(lE):'—'}</td>
+                          <td style={{ padding:'8px 8px', textAlign:'center' }}>
+                            {proj.scope_note
+                              ? <button
+                                  title="View Scope Note"
+                                  onClick={e => { e.stopPropagation(); setNotePopup({ name: proj.name, note: proj.scope_note, x: e.clientX, y: e.clientY }); }}
+                                  style={{ background:'rgba(99,102,241,.12)', border:'1px solid rgba(99,102,241,.3)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:11, color:'var(--brand)', fontWeight:600, whiteSpace:'nowrap' }}>
+                                  📋 Note
+                                </button>
+                              : <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>}
+                          </td>
                         </tr>
                         {/* Phase breakdown rows */}
                         {isExpanded && (
                           <tr>
-                            <td colSpan={8} style={{ padding:'0', background:'rgba(99,102,241,.02)', borderBottom:'2px solid rgba(99,102,241,.15)' }}>
+                            <td colSpan={9} style={{ padding:'0', background:'rgba(99,102,241,.02)', borderBottom:'2px solid rgba(99,102,241,.15)' }}>
                               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                                 <thead>
                                   <tr style={{ background:'rgba(99,102,241,.06)', fontSize:10, textTransform:'uppercase', color:'var(--muted)', letterSpacing:'.04em' }}>
@@ -9605,6 +10104,30 @@
             {plan.projects.map((proj, pi) => renderProjectFlat(proj, pi))}
 
           </div>
+
+          {/* ── Scope Note Popup ─────────────────────────────────────────── */}
+          {notePopup && (
+            <div onClick={() => setNotePopup(null)}
+              style={{ position:'fixed', inset:0, zIndex:3000, background:'rgba(0,0,0,.35)' }}>
+              <div onClick={e => e.stopPropagation()}
+                style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+                  background:'var(--s1)', border:'1px solid var(--border)', borderRadius:12,
+                  padding:24, maxWidth:520, width:'90%', boxShadow:'0 8px 40px rgba(0,0,0,.28)', zIndex:3001 }}>
+                <div style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:14 }}>
+                  <span style={{ fontSize:20 }}>📋</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:800, fontSize:14, color:'var(--brand)', marginBottom:2 }}>Scope Note</div>
+                    <div style={{ fontSize:12, fontWeight:600, color:'var(--fg)' }}>{notePopup.name}</div>
+                  </div>
+                  <button onClick={() => setNotePopup(null)}
+                    style={{ background:'none', border:'none', cursor:'pointer', fontSize:18, color:'var(--muted)', lineHeight:1, padding:0 }}>×</button>
+                </div>
+                <div style={{ fontSize:13, color:'var(--fg)', lineHeight:1.65, whiteSpace:'pre-wrap', background:'rgba(99,102,241,.04)', borderRadius:8, padding:'12px 14px', border:'1px solid rgba(99,102,241,.12)' }}>
+                  {notePopup.note}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -9629,6 +10152,7 @@
       const [showResHub, setShowResHub] = useState(false);
       const [showResHub1, setShowResHub1] = useState(false);
       const [showProjExt, setShowProjExt] = useState(false);
+      const [showProgress, setShowProgress] = useState(false);
       const [showC2026, setShowC2026] = useState(false);
       const [dashSettings, setDashSettings] = useState(DEFAULT_SETTINGS);
       const [showReportPicker, setShowReportPicker] = useState(false);
@@ -9717,10 +10241,26 @@
       const userModules = user.allowed_modules && user.allowed_modules.length
         ? user.allowed_modules
         : ['project_page', 'action_items', 'intelligence', 'project_ext', 'c2026', 'resources'];
+      // Map topbar/module keys to dashSettings keys
+      const TOPBAR_SETTING_MAP = {
+        project_ext:      'topbar_project_ext',
+        project_progress: 'topbar_project_progress',
+        c2026:            'topbar_c2026',
+        standup:          'topbar_standup',
+        report:           'topbar_report',
+        resources:        'topbar_resources',
+        resource_hub:     'topbar_resource_hub',
+        action_items:     'show_action_items',
+      };
       const canSee = (key) => {
         if (user.role === 'admin') return true;
-        // standup and report are admin-only regardless of modules
-        if (key === 'standup' || key === 'report') return false;
+        // DB and Admin buttons are always admin-only
+        if (key === 'db' || key === 'admin') return false;
+        // Check dashSettings topbar toggles for non-admins
+        const settingKey = TOPBAR_SETTING_MAP[key];
+        if (settingKey) {
+          return !!dashSettings[settingKey];
+        }
         return userModules.includes(key);
       };
       // CUBES 2026 only mode: auto-open on first render
@@ -9787,6 +10327,12 @@
                   📋 Project Ext.
                 </button>
               )}
+              {canSee('project_progress') && (
+                <button className="admin-btn" style={{ background: 'linear-gradient(135deg,rgba(6,182,212,.12),rgba(14,165,233,.08))', borderColor: 'rgba(6,182,212,.4)', color: '#0891b2' }}
+                  onClick={() => setShowProgress(true)} title="Project Progress Overview">
+                  📊 Project Progress
+                </button>
+              )}
               {canSee('c2026') && user.c2026_access !== 'no_access' && (
                 <button className="admin-btn" style={{ background: 'linear-gradient(135deg,rgba(99,102,241,.15),rgba(129,140,248,.08))', borderColor: 'rgba(99,102,241,.4)', color: '#6366f1' }}
                   onClick={() => setShowC2026(true)} title="CUBES 2026 Program Plan">
@@ -9811,9 +10357,9 @@
                   📊 Resources
                 </button>
               )}
-              {canSee('resources') && (
+              {canSee('resource_hub') && (
                 <button className="admin-btn" style={{ background: 'linear-gradient(135deg,rgba(16,185,129,.15),rgba(5,150,105,.1))', borderColor: 'rgba(16,185,129,.4)', color: '#10b981' }}
-                  onClick={() => setShowResHub1(true)} title="Open Resource Hub v2 (new design)">
+                  onClick={() => setShowResHub1(true)} title="Open Resource Hub (new design)">
                   🗂 Resource Hub1
                 </button>
               )}
@@ -9879,6 +10425,7 @@
           {showResHub && <ResourceHub user={user} onClose={() => setShowResHub(false)} />}
           {showResHub1 && <ResourceHub1 user={user} onClose={() => setShowResHub1(false)} />}
           {showProjExt && <ProjectExtension user={user} onClose={() => setShowProjExt(false)} />}
+          {showProgress && <ProjectProgress user={user} projects={projects} onClose={() => setShowProgress(false)} />}
           {showC2026 && <Cubes2026Plan user={user} onClose={() => setShowC2026(false)} />}
           {showReportPicker && (
             <ReportProjectPicker
