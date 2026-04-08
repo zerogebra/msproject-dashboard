@@ -3163,14 +3163,16 @@
       useEffect(() => { load(); }, []);
 
       const ALL_MODULES = [
-        { key: 'project_page',  icon: '🏠', label: 'Main Project Dashboard' },
-        { key: 'action_items',  icon: '✅', label: 'Action Items box' },
-        { key: 'intelligence',  icon: '🤖', label: 'Project Intelligence panel' },
-        { key: 'project_ext',   icon: '📋', label: 'Project Ext.' },
-        { key: 'c2026',         icon: '🏗', label: 'CUBES 2026 Plan' },
-        { key: 'standup',       icon: '📋', label: 'PM Daily Standup (admin only)' },
-        { key: 'report',        icon: '📧', label: 'Generate Report (admin only)' },
-        { key: 'resources',     icon: '📊', label: 'Resources' },
+        { key: 'project_page',      icon: '🏠', label: 'Main Project Dashboard' },
+        { key: 'action_items',      icon: '✅', label: 'Action Items box' },
+        { key: 'intelligence',      icon: '🤖', label: 'Project Intelligence panel' },
+        { key: 'project_ext',       icon: '📋', label: 'Project Ext.' },
+        { key: 'project_progress',  icon: '📊', label: 'Project Progress tab' },
+        { key: 'c2026',             icon: '🏗', label: 'CUBES 2026 Plan' },
+        { key: 'standup',           icon: '📋', label: 'PM Daily Standup' },
+        { key: 'report',            icon: '📧', label: 'Generate Report' },
+        { key: 'resources',         icon: '📊', label: 'Resources' },
+        { key: 'resource_hub',      icon: '🗂', label: 'Resource Hub' },
       ];
       const DEFAULT_USER_MODULES = ['project_page', 'action_items', 'intelligence', 'project_ext', 'c2026', 'resources'];
       function openAdd() {
@@ -10241,26 +10243,11 @@
       const userModules = user.allowed_modules && user.allowed_modules.length
         ? user.allowed_modules
         : ['project_page', 'action_items', 'intelligence', 'project_ext', 'c2026', 'resources'];
-      // Map topbar/module keys to dashSettings keys
-      const TOPBAR_SETTING_MAP = {
-        project_ext:      'topbar_project_ext',
-        project_progress: 'topbar_project_progress',
-        c2026:            'topbar_c2026',
-        standup:          'topbar_standup',
-        report:           'topbar_report',
-        resources:        'topbar_resources',
-        resource_hub:     'topbar_resource_hub',
-        action_items:     'show_action_items',
-      };
+      // canSee: per-user allowed_modules is the single source of truth.
+      // DB and Admin are always admin-only regardless.
       const canSee = (key) => {
         if (user.role === 'admin') return true;
-        // DB and Admin buttons are always admin-only
         if (key === 'db' || key === 'admin') return false;
-        // Check dashSettings topbar toggles for non-admins
-        const settingKey = TOPBAR_SETTING_MAP[key];
-        if (settingKey) {
-          return !!dashSettings[settingKey];
-        }
         return userModules.includes(key);
       };
       // CUBES 2026 only mode: auto-open on first render

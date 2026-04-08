@@ -25,8 +25,8 @@ def verify_password(user: dict, pw: str) -> bool:
 
 # ── helpers ──────────────────────────────────────────────────────
 
-ALL_MODULES = ["project_page", "project_ext", "c2026", "standup", "report", "resources",
-               "action_items", "intelligence"]
+ALL_MODULES = ["project_page", "project_ext", "project_progress", "c2026", "standup",
+               "report", "resources", "resource_hub", "action_items", "intelligence"]
 
 def _row_to_dict(row) -> dict:
     if row is None:
