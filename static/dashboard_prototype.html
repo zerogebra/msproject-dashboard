@@ -9124,6 +9124,7 @@
       const [ganttExpanded, setGanttExpanded] = React.useState({});
       const [summaryExpanded, setSummaryExpanded] = React.useState({});
       const [notePopup, setNotePopup] = React.useState(null); // {name, note, x, y}
+      const [phaseHistory, setPhaseHistory] = React.useState({}); // key => { undo:[phaseSnap], redo:[phaseSnap] }
       const uid = () => 'id_' + Math.random().toString(36).slice(2,10);
 
       React.useEffect(() => {
@@ -9131,6 +9132,50 @@
       }, []);
 
       function update(fn) { setPlan(p => { const n = JSON.parse(JSON.stringify(p)); fn(n); return n; }); }
+      function phaseKey(pi, phi) { return `${pi}-${phi}`; }
+      function cloneObj(x) { return JSON.parse(JSON.stringify(x)); }
+      function updatePhase(pi, phi, fn) {
+        const key = phaseKey(pi, phi);
+        setPlan(prev => {
+          const before = prev?.projects?.[pi]?.phases?.[phi];
+          if (!before) return prev;
+          const n = cloneObj(prev);
+          fn(n);
+          // keep last 3 snapshots, clear redo after a new edit
+          setPhaseHistory(h => {
+            const cur = h[key] || { undo: [], redo: [] };
+            const undo = [...cur.undo, cloneObj(before)].slice(-3);
+            return { ...h, [key]: { undo, redo: [] } };
+          });
+          return n;
+        });
+      }
+      function undoOrRedoPhase(pi, phi) {
+        const key = phaseKey(pi, phi);
+        const entry = phaseHistory[key] || { undo: [], redo: [] };
+        if (!entry.undo.length && !entry.redo.length) return;
+        const n = cloneObj(plan);
+        const current = n?.projects?.[pi]?.phases?.[phi];
+        if (!current) return;
+        // If there is undo history, undo. If not, redo (single button toggle behavior).
+        if (entry.undo.length) {
+          const target = entry.undo[entry.undo.length - 1];
+          n.projects[pi].phases[phi] = cloneObj(target);
+          setPlan(n);
+          setPhaseHistory(h => {
+            const e = h[key] || { undo: [], redo: [] };
+            return { ...h, [key]: { undo: e.undo.slice(0, -1), redo: [...e.redo, cloneObj(current)].slice(-3) } };
+          });
+        } else {
+          const target = entry.redo[entry.redo.length - 1];
+          n.projects[pi].phases[phi] = cloneObj(target);
+          setPlan(n);
+          setPhaseHistory(h => {
+            const e = h[key] || { undo: [], redo: [] };
+            return { ...h, [key]: { undo: [...e.undo, cloneObj(current)].slice(-3), redo: e.redo.slice(0, -1) } };
+          });
+        }
+      }
 
       async function savePlan() {
         setSaving(true);
@@ -9255,7 +9300,7 @@
         }
       }
       function updateTeamRow(pi, phi, ri, field, val) {
-        update(n => {
+        updatePhase(pi, phi, n => {
           const r = n.projects[pi].phases[phi].team_rows[ri];
           r[field] = val;
           const cm = buildCodeMap(n);
@@ -9263,7 +9308,7 @@
         });
       }
       function updateRelease(pi, phi, ri, field, val) {
-        update(n => { const r = n.projects[pi].phases[phi].releases[ri]; r[field] = val; autoCalc(r, null); });
+        updatePhase(pi, phi, n => { const r = n.projects[pi].phases[phi].releases[ri]; r[field] = val; autoCalc(r, null, field); });
       }
 
       function calcPhasePct(phase) {
@@ -9455,7 +9500,7 @@
                             <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                               <span style={{ fontSize:10, fontWeight:800, color:'var(--brand)', background:'rgba(99,102,241,.12)', padding:'1px 7px', borderRadius:10 }}>Phase {phi+1}</span>
                               {canEdit
-                                ? <input value={phase.name} onChange={e => update(n => { n.projects[pi].phases[phi].name = e.target.value; })}
+                                ? <input value={phase.name} onChange={e => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].name = e.target.value; })}
                                     style={{ fontWeight:700, fontSize:13, background:'transparent', border:'none', outline:'none', color:'var(--fg)', flex:1, minWidth:80 }} />
                                 : <span style={{ fontWeight:700, fontSize:13, flex:1 }}>{phase.name}</span>}
                               {phasePct != null && (
@@ -9468,10 +9513,19 @@
                               )}
                               {canEdit && (
                                 <div style={{ display:'flex', gap:4, marginLeft:'auto' }}>
-                                  <button onClick={() => update(n => { n.projects[pi].phases[phi].team_rows.push({id:uid(),team:'New',status:'TBD',pct:null,days:null,start:null,end:null}); })}
+                                  <button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows.push({id:uid(),team:'New',status:'TBD',pct:null,days:null,start:null,end:null}); })}
                                     style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid #6366f1', background:'transparent', color:'#6366f1', cursor:'pointer' }}>+ Row</button>
-                                  <button onClick={() => update(n => { const rels=n.projects[pi].phases[phi].releases; rels.push({id:uid(),name:'Release '+(rels.length+1),days:null,start:null,end:null}); })}
+                                  <button onClick={() => updatePhase(pi, phi, n => { const rels=n.projects[pi].phases[phi].releases; rels.push({id:uid(),name:'Release '+(rels.length+1),days:null,start:null,end:null}); })}
                                     style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid #f59e0b', background:'transparent', color:'#f59e0b', cursor:'pointer' }}>+ Release</button>
+                                  <button
+                                    onClick={() => undoOrRedoPhase(pi, phi)}
+                                    disabled={!((phaseHistory[phaseKey(pi, phi)]?.undo?.length || 0) || (phaseHistory[phaseKey(pi, phi)]?.redo?.length || 0))}
+                                    title={(phaseHistory[phaseKey(pi, phi)]?.undo?.length || 0)
+                                      ? `Undo last change (${phaseHistory[phaseKey(pi, phi)]?.undo?.length}/3)`
+                                      : ((phaseHistory[phaseKey(pi, phi)]?.redo?.length || 0) ? `Redo last undo (${phaseHistory[phaseKey(pi, phi)]?.redo?.length}/3)` : 'No undo history')}
+                                    style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid #16a34a', background:'transparent', color:'#16a34a', cursor:'pointer', opacity:((phaseHistory[phaseKey(pi, phi)]?.undo?.length || 0) || (phaseHistory[phaseKey(pi, phi)]?.redo?.length || 0)) ? 1 : .45 }}>
+                                    {(phaseHistory[phaseKey(pi, phi)]?.undo?.length || 0) ? '↶ Undo' : '↷ Redo'}
+                                  </button>
                                   <button onClick={() => { if(window.confirm('Delete phase?')) update(n => { n.projects[pi].phases.splice(phi,1); }); }}
                                     style={{ fontSize:10, padding:'2px 5px', borderRadius:4, border:'1px solid #ef4444', background:'transparent', color:'#ef4444', cursor:'pointer' }}>🗑</button>
                                 </div>
@@ -9495,7 +9549,7 @@
                               <td style={{ padding:'5px 12px' }}>
                                 <div style={{ fontWeight:700, fontSize:12, color:'var(--fg)' }}>
                                   {canEdit
-                                    ? <input value={row.team} onChange={e => update(n => { n.projects[pi].phases[phi].team_rows[ri].team = e.target.value; })}
+                                    ? <input value={row.team} onChange={e => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows[ri].team = e.target.value; })}
                                         style={{ width:80, background:'transparent', border:'none', outline:'none', fontWeight:700, color:'var(--fg)', fontSize:12 }} />
                                     : row.team}
                                 </div>
@@ -9546,7 +9600,7 @@
                                       <span style={{ color:'var(--muted)', fontWeight:400 }}>{dep.type||'FS'}</span>
                                       <span style={{ margin:'0 2px' }}>↗</span>
                                       {dep.ref}
-                                      {canEdit && <span onClick={() => update(n => { n.projects[pi].phases[phi].team_rows[ri].depends_on.splice(di,1); })} style={{ cursor:'pointer', color:'#ef4444', marginLeft:3, fontWeight:700 }}>×</span>}
+                                      {canEdit && <span onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows[ri].depends_on.splice(di,1); })} style={{ cursor:'pointer', color:'#ef4444', marginLeft:3, fontWeight:700 }}>×</span>}
                                     </span>
                                   ))}
                                   {canEdit && (
@@ -9555,7 +9609,7 @@
                                       onChange={e => {
                                         const ref = e.target.value;
                                         if (!ref) return;
-                                        update(n => {
+                                        updatePhase(pi, phi, n => {
                                           const r = n.projects[pi].phases[phi].team_rows[ri];
                                           if (!r.depends_on) r.depends_on = [];
                                           if (!r.depends_on.find(d => d.ref === ref)) {
@@ -9585,15 +9639,16 @@
                               </td>
                               {/* End (auto from start+days) */}
                               <td style={{ padding:'4px 8px', textAlign:'center' }}>
-                                {endAuto
-                                  ? <span style={{ color:'#6366f1', fontWeight:600, fontSize:11, whiteSpace:'nowrap' }}>{row.end?fmt(row.end):'—'} ⟵</span>
-                                  : canEdit
-                                    ? <input type="date" defaultValue={row.end??''} key={row.id+'_end_'+row.end}
+                                {canEdit
+                                  ? <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+                                      <input type="date" defaultValue={row.end??''} key={row.id+'_end_'+row.end}
                                         onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'end',v===''?null:v); }}
                                         style={{ background:row.end==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.end==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.end==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                    : <span style={{ color:row.end==null?'#94a3b8':'var(--fg)' }}>{row.end?fmt(row.end):'—'}</span>}
+                                      {endAuto && <span style={{ color:'#6366f1', fontWeight:700, fontSize:10 }} title="Auto-calculated from Start + Days (you can override)">⟵</span>}
+                                    </div>
+                                  : <span style={{ color:row.end==null?'#94a3b8':'var(--fg)' }}>{row.end?fmt(row.end):'—'}</span>}
                               </td>
-                              {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => update(n => { n.projects[pi].phases[phi].team_rows.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
+                              {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
                             </tr>
                           );
                         })}
@@ -9605,7 +9660,7 @@
                               <td style={{ padding:'5px 6px 5px 28px', fontWeight:700, color:'#b45309' }}>
                                 <span style={{ marginRight:4 }}>📦</span>
                                 {canEdit
-                                  ? <input value={rel.name} onChange={e => update(n => { n.projects[pi].phases[phi].releases[ri].name = e.target.value; })}
+                                  ? <input value={rel.name} onChange={e => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].releases[ri].name = e.target.value; })}
                                       style={{ background:'transparent', border:'none', outline:'none', fontWeight:700, color:'#b45309', fontSize:12, width:130 }} />
                                   : rel.name}
                               </td>
@@ -9626,15 +9681,16 @@
                                   : <span style={{ color:rel.start==null?'#94a3b8':'var(--fg)' }}>{rel.start?fmt(rel.start):'TBD'}</span>}
                               </td>
                               <td style={{ padding:'4px 8px', textAlign:'center' }}>
-                                {endAuto
-                                  ? <span style={{ color:'#6366f1', fontWeight:600, fontSize:11, whiteSpace:'nowrap' }}>{rel.end?fmt(rel.end):'—'} ⟵</span>
-                                  : canEdit
-                                    ? <input type="date" defaultValue={rel.end??''} key={rel.id+'_end_'+rel.end}
+                                {canEdit
+                                  ? <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+                                      <input type="date" defaultValue={rel.end??''} key={rel.id+'_end_'+rel.end}
                                         onBlur={e => { const v=e.target.value; updateRelease(pi,phi,ri,'end',v===''?null:v); }}
                                         style={{ background:rel.end==null?'rgba(245,158,11,.08)':'var(--s2)', border:rel.end==null?'1px dashed #f59e0b':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:rel.end==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                    : <span style={{ color:rel.end==null?'#94a3b8':'var(--fg)' }}>{rel.end?fmt(rel.end):'TBD'}</span>}
+                                      {endAuto && <span style={{ color:'#6366f1', fontWeight:700, fontSize:10 }} title="Auto-calculated from Start + Days (you can override)">⟵</span>}
+                                    </div>
+                                  : <span style={{ color:rel.end==null?'#94a3b8':'var(--fg)' }}>{rel.end?fmt(rel.end):'TBD'}</span>}
                               </td>
-                              {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => update(n => { n.projects[pi].phases[phi].releases.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
+                              {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].releases.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
                             </tr>
                           );
                         })}
