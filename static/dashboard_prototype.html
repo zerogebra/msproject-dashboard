@@ -9332,6 +9332,17 @@
         const tot = data.reduce((s, x) => s + x.days, 0);
         return Math.round(data.reduce((s, x) => s + x.pct * x.days, 0) / tot);
       }
+      function calcProjectWindow(proj) {
+        let allS = [], allE = [];
+        (proj.phases || []).forEach(ph => {
+          (ph.team_rows || []).forEach(r => { if (r.start) allS.push(r.start); if (r.end) allE.push(r.end); });
+          (ph.releases || []).forEach(r => { if (r.start) allS.push(r.start); if (r.end) allE.push(r.end); });
+        });
+        return {
+          computedStart: allS.length ? allS.sort()[0] : null,
+          computedEnd: allE.length ? allE.sort().reverse()[0] : null,
+        };
+      }
 
       function calcOverall() {
         if (!plan) return null;
@@ -9837,30 +9848,11 @@
                   {/* Project rows */}
                   {plan.projects.map((proj, pi) => {
                     const projPct = calcProjectPct(proj);
-                    // For start: earliest start across all phases
-                    let allS=[];
-                    proj.phases.forEach(ph => {
-                      ph.team_rows.forEach(r => { if(r.start) allS.push(r.start); });
-                      ph.releases.forEach(r => { if(r.start) allS.push(r.start); });
-                    });
-                    // For end: use manual override OR latest end in the LAST phase only
-                    // (avoids Phase 1 FE long-running tasks inflating the project end)
-                    const projStart = allS.length ? allS.sort()[0] : null;
-                    let projEnd = proj.target_end || null;
-                    if (!projEnd && proj.phases.length) {
-                      const lastPh = proj.phases[proj.phases.length - 1];
-                      let lastPhE = [];
-                      lastPh.team_rows.forEach(r => { if(r.end) lastPhE.push(r.end); });
-                      lastPh.releases.forEach(r => { if(r.end) lastPhE.push(r.end); });
-                      if (!lastPhE.length) {
-                        // Fallback: use latest end across all phases
-                        proj.phases.forEach(ph => {
-                          ph.team_rows.forEach(r => { if(r.end) lastPhE.push(r.end); });
-                          ph.releases.forEach(r => { if(r.end) lastPhE.push(r.end); });
-                        });
-                      }
-                      projEnd = lastPhE.length ? lastPhE.sort().reverse()[0] : null;
-                    }
+                    const { computedStart, computedEnd } = calcProjectWindow(proj);
+                    // Program Summary default End is TBD unless admin sets/Syncs it.
+                    const projStart = proj.summary_start || computedStart;
+                    const projEnd = (proj.summary_end !== undefined && proj.summary_end !== null) ? proj.summary_end : null;
+                    const shownPct = (proj.summary_pct != null) ? proj.summary_pct : projPct;
                     const bp = barPos(projStart, projEnd, cols);
                     const isExpanded = !!ganttExpanded[proj.id];
                     return (
@@ -9872,21 +9864,45 @@
                               onClick={() => setGanttExpanded(g => ({ ...g, [proj.id]: !g[proj.id] }))}>{isExpanded?'▼':'▶'}</span>
                             <div style={{ overflow:'hidden', flex:1 }} onClick={() => setGanttExpanded(g => ({ ...g, [proj.id]: !g[proj.id] }))}>
                               <div style={{ fontSize:11, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--fg)', maxWidth:170 }}>{proj.name}</div>
-                              <div style={{ fontSize:10, fontWeight:600, color:phaseColor(projPct) }}>{projPct!=null?projPct+'%':'TBD — click to fill'}</div>
+                              <div style={{ fontSize:10, fontWeight:600, color:phaseColor(shownPct) }}>{shownPct!=null?shownPct+'%':'TBD — click to fill'}</div>
                             </div>
-                            <div title={canEdit ? "Click to override project end date" : "Calculated end date"} style={{ flexShrink:0 }}>
+                            {canEdit && (
+                              <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
+                                <span style={{ fontSize:9, color:'var(--muted)' }}>S</span>
+                                <input type="date" value={proj.summary_start || ''} onClick={e => e.stopPropagation()}
+                                  onChange={e => { e.stopPropagation(); update(n => { n.projects[pi].summary_start = e.target.value || null; }); }}
+                                  style={{ width:105, fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)' }}
+                                  title="Manual Program Summary Start date" />
+                                <span style={{ fontSize:9, color:'var(--muted)' }}>%</span>
+                                <input type="number" min="0" max="100" value={proj.summary_pct ?? ''} onClick={e => e.stopPropagation()}
+                                  onChange={e => { e.stopPropagation(); update(n => { const v=e.target.value; n.projects[pi].summary_pct = v === '' ? null : Math.max(0, Math.min(100, parseFloat(v))); }); }}
+                                  style={{ width:52, fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)' }}
+                                  title="Manual Program Summary % (leave blank to use auto)" />
+                              </div>
+                            )}
+                            <div title="Program Summary End date (manual)" style={{ flexShrink:0 }}>
                               {canEdit ? (
-                                <label style={{ cursor:'pointer', position:'relative', display:'flex', alignItems:'center' }}>
-                                  <input type="date" value={proj.target_end||''} onClick={e => e.stopPropagation()}
-                                    onChange={e => { e.stopPropagation(); update(n => { n.projects[pi].target_end = e.target.value || null; }); }}
-                                    style={{ position:'absolute', opacity:0, width:'100%', height:'100%', cursor:'pointer', top:0, left:0, zIndex:2 }} />
-                                  <span style={{ fontSize:9, color: proj.target_end ? '#f59e0b' : '#6366f1', fontWeight:700, whiteSpace:'nowrap', background: proj.target_end ? 'rgba(245,158,11,.1)' : 'rgba(99,102,241,.08)', border:`1px solid ${proj.target_end?'rgba(245,158,11,.3)':'rgba(99,102,241,.2)'}`, borderRadius:4, padding:'1px 5px' }}>
-                                    ✎ {projEnd ? fmt(projEnd) : 'set end'}
-                                  </span>
-                                </label>
+                                <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                                  <input type="date" value={proj.summary_end || ''} onClick={e => e.stopPropagation()}
+                                    onChange={e => { e.stopPropagation(); update(n => { n.projects[pi].summary_end = e.target.value || null; }); }}
+                                    style={{ width:105, fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)' }} />
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      update(n => {
+                                        const pRef = n.projects[pi];
+                                        const wnd = calcProjectWindow(pRef);
+                                        pRef.summary_start = wnd.computedStart || null;
+                                        pRef.summary_end = wnd.computedEnd || null;
+                                        pRef.summary_pct = calcProjectPct(pRef);
+                                      });
+                                    }}
+                                    style={{ fontSize:9, padding:'1px 6px', borderRadius:4, border:'1px solid #16a34a', color:'#16a34a', background:'transparent', cursor:'pointer' }}
+                                    title="Sync from project tasks">↻ Sync</button>
+                                </div>
                               ) : (
                                 <span style={{ fontSize:9, color:'#6366f1', fontWeight:700, whiteSpace:'nowrap', background:'rgba(99,102,241,.08)', border:'1px solid rgba(99,102,241,.2)', borderRadius:4, padding:'1px 5px' }}>
-                                  {projEnd ? fmt(projEnd) : '—'}
+                                  {projEnd ? fmt(projEnd) : 'TBD'}
                                 </span>
                               )}
                             </div>
@@ -9896,9 +9912,9 @@
                             {tPct!==null && <div style={{ position:'absolute', left:tPct+'%', top:0, bottom:0, width:2, borderLeft:'2px dashed #ef4444', zIndex:5 }} />}
                             {bp ? (
                               <>
-                                <div style={{ position:'absolute', left:bp.left+'%', width:bp.width+'%', top:'20%', height:'60%', background:phaseColor(projPct), opacity:0.15, borderRadius:3 }} />
-                                <div style={{ position:'absolute', left:bp.left+'%', width:(bp.width*(projPct||0)/100)+'%', top:'20%', height:'60%', background:phaseColor(projPct), opacity:0.9, borderRadius:3, display:'flex', alignItems:'center', justifyContent:'flex-end', overflow:'hidden', minWidth:projPct>0?2:0 }}>
-                                  {projPct>15 && <span style={{ fontSize:9, color:'#fff', fontWeight:700, paddingRight:4 }}>{projPct}%</span>}
+                                <div style={{ position:'absolute', left:bp.left+'%', width:bp.width+'%', top:'20%', height:'60%', background:phaseColor(shownPct), opacity:0.15, borderRadius:3 }} />
+                                <div style={{ position:'absolute', left:bp.left+'%', width:(bp.width*(shownPct||0)/100)+'%', top:'20%', height:'60%', background:phaseColor(shownPct), opacity:0.9, borderRadius:3, display:'flex', alignItems:'center', justifyContent:'flex-end', overflow:'hidden', minWidth:shownPct>0?2:0 }}>
+                                  {shownPct>15 && <span style={{ fontSize:9, color:'#fff', fontWeight:700, paddingRight:4 }}>{shownPct}%</span>}
                                 </div>
                               </>
                             ) : (
