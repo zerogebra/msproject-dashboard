@@ -9970,11 +9970,13 @@
               </div>
             </div>
 
-            {/* ══ SECTION 2: PROGRAM SUMMARY (read-only) ════════════════════ */}
+            {/* ══ SECTION 2: PROGRAM SUMMARY ════════════════════════════════ */}
             <div style={{ marginBottom:28, borderRadius:10, border:'1px solid var(--border)', background:'var(--s1)', overflow:'hidden' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 16px', background:'rgba(99,102,241,.05)', borderBottom:'1px solid var(--border)' }}>
                 <span style={{ fontWeight:700, fontSize:13 }}>📊 Program Summary</span>
-                <span style={{ fontSize:11, background:'rgba(34,197,94,.08)', color:'#16a34a', padding:'1px 8px', borderRadius:10, fontWeight:600 }}>Read Only</span>
+                <span style={{ fontSize:11, background: canEdit ? 'rgba(99,102,241,.10)' : 'rgba(34,197,94,.08)', color: canEdit ? 'var(--brand)' : '#16a34a', padding:'1px 8px', borderRadius:10, fontWeight:600 }}>
+                  {canEdit ? 'Admin Editable + Sync' : 'Read Only'}
+                </span>
               </div>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead>
@@ -9990,8 +9992,12 @@
                     const pct = calcProjectPct(proj);
                     let allS2=[], allE2=[];
                     proj.phases.forEach(ph => { ph.team_rows.forEach(r => { if(r.start) allS2.push(r.start); if(r.end) allE2.push(r.end); }); });
-                    const eS = allS2.length?allS2.sort()[0]:null;
-                    const lE = allE2.length?allE2.sort().reverse()[0]:null;
+                    const computedS = allS2.length?allS2.sort()[0]:null;
+                    const computedE = allE2.length?allE2.sort().reverse()[0]:null;
+                    const shownS = proj.summary_start || computedS;
+                    // Requirement: default End in Program Summary should be TBD until admin sets or syncs
+                    const shownE = (proj.summary_end !== undefined && proj.summary_end !== null) ? proj.summary_end : null;
+                    const shownPct = (proj.summary_pct != null) ? proj.summary_pct : pct;
                     const isExpanded = !!summaryExpanded[proj.id];
                     const toggle = () => setSummaryExpanded(s => ({ ...s, [proj.id]: !s[proj.id] }));
                     return (
@@ -10002,29 +10008,77 @@
                           <td style={{ padding:'8px 8px', textAlign:'center', color:'var(--muted)', fontSize:11 }}>{isExpanded ? '▼' : '▶'}</td>
                           <td style={{ padding:'8px 12px', color:'var(--muted)', fontWeight:700, width:30 }}>{i+1}</td>
                           <td style={{ padding:'8px 12px', fontWeight:700, color:'var(--brand)' }}>{proj.name}</td>
-                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>{proj.description||'—'}</td>
+                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>
+                            {canEdit
+                              ? <input value={proj.description||''}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => update(n => { n.projects[i].description = e.target.value; })}
+                                  style={{ width:'100%', minWidth:160, background:'var(--s2)', border:'1px solid var(--border)', borderRadius:4, padding:'4px 6px', color:'var(--fg)', fontSize:11 }} />
+                              : (proj.description||'—')}
+                          </td>
                           <td style={{ padding:'8px 12px', textAlign:'center', fontWeight:600 }}>{proj.phases.length}</td>
                           <td style={{ padding:'8px 12px' }}>
-                            {pct!=null
+                            {shownPct!=null
                               ? <div style={{ display:'flex', alignItems:'center', gap:7 }}>
                                   <div style={{ width:70, height:7, background:'var(--s2)', borderRadius:4, overflow:'hidden' }}>
-                                    <div style={{ width:pct+'%', height:'100%', background:phaseColor(pct), borderRadius:4 }} />
+                                    <div style={{ width:shownPct+'%', height:'100%', background:phaseColor(shownPct), borderRadius:4 }} />
                                   </div>
-                                  <span style={{ fontWeight:800, color:phaseColor(pct) }}>{pct}%</span>
+                                  {canEdit
+                                    ? <input type="number" min="0" max="100" value={shownPct}
+                                        onClick={e => e.stopPropagation()}
+                                        onChange={e => update(n => { const v=e.target.value; n.projects[i].summary_pct = v===''?null:Math.max(0,Math.min(100,parseFloat(v))); })}
+                                        style={{ width:58, background:'var(--s2)', border:'1px solid var(--border)', borderRadius:4, padding:'2px 6px', color:phaseColor(shownPct), fontWeight:800, fontSize:11, textAlign:'center' }} />
+                                    : <span style={{ fontWeight:800, color:phaseColor(shownPct) }}>{shownPct}%</span>}
                                 </div>
                               : <span style={{ color:'#94a3b8', fontStyle:'italic', fontSize:11 }}>TBD</span>}
                           </td>
-                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>{eS?fmt(eS):'—'}</td>
-                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>{lE?fmt(lE):'—'}</td>
+                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>
+                            {canEdit
+                              ? <input type="date" value={shownS||''}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => update(n => { n.projects[i].summary_start = e.target.value || null; })}
+                                  style={{ background:'var(--s2)', border:'1px solid var(--border)', borderRadius:4, padding:'2px 6px', color:'var(--fg)', fontSize:11 }} />
+                              : (shownS?fmt(shownS):'—')}
+                          </td>
+                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>
+                            {canEdit
+                              ? <input type="date" value={shownE||''}
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => update(n => { n.projects[i].summary_end = e.target.value || null; })}
+                                  style={{ background:'var(--s2)', border:'1px solid var(--border)', borderRadius:4, padding:'2px 6px', color:'var(--fg)', fontSize:11 }} />
+                              : (shownE?fmt(shownE):'TBD')}
+                          </td>
                           <td style={{ padding:'8px 8px', textAlign:'center' }}>
-                            {proj.scope_note
-                              ? <button
-                                  title="View Scope Note"
-                                  onClick={e => { e.stopPropagation(); setNotePopup({ name: proj.name, note: proj.scope_note, x: e.clientX, y: e.clientY }); }}
-                                  style={{ background:'rgba(99,102,241,.12)', border:'1px solid rgba(99,102,241,.3)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:11, color:'var(--brand)', fontWeight:600, whiteSpace:'nowrap' }}>
-                                  📋 Note
+                            <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+                              {canEdit && (
+                                <button
+                                  title="Sync this row from project tasks"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    update(n => {
+                                      const pRef = n.projects[i];
+                                      let s=[], e2=[];
+                                      (pRef.phases||[]).forEach(ph => {
+                                        (ph.team_rows||[]).forEach(r => { if(r.start) s.push(r.start); if(r.end) e2.push(r.end); });
+                                      });
+                                      pRef.summary_start = s.length ? s.sort()[0] : null;
+                                      pRef.summary_end = e2.length ? e2.sort().reverse()[0] : null;
+                                      pRef.summary_pct = calcProjectPct(pRef);
+                                    });
+                                  }}
+                                  style={{ background:'rgba(34,197,94,.12)', border:'1px solid rgba(34,197,94,.35)', borderRadius:6, padding:'2px 7px', cursor:'pointer', fontSize:10, color:'#16a34a', fontWeight:700 }}>
+                                  ↻ Sync
                                 </button>
-                              : <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>}
+                              )}
+                              {proj.scope_note
+                                ? <button
+                                    title="View Scope Note"
+                                    onClick={e => { e.stopPropagation(); setNotePopup({ name: proj.name, note: proj.scope_note, x: e.clientX, y: e.clientY }); }}
+                                    style={{ background:'rgba(99,102,241,.12)', border:'1px solid rgba(99,102,241,.3)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:11, color:'var(--brand)', fontWeight:600, whiteSpace:'nowrap' }}>
+                                    📋 Note
+                                  </button>
+                                : <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>}
+                            </div>
                           </td>
                         </tr>
                         {/* Phase breakdown rows */}
