@@ -123,12 +123,20 @@ def delete_user(user_id: str) -> bool:
 
 def can_access_project(user: dict, project_name: str) -> bool:
     pf = (user.get("project_filter") or "all").lower()
+    name = (project_name or "").lower()
     if pf == "all":
         return True
+    # Backward-compatible aliases:
+    # - "implementation" users should also match projects tagged as "[Imp]"
+    # - "cubes" users should match "[Cubes]" naming style as well
+    if pf in ("implementation", "imp"):
+        return ("[imp]" in name) or ("implementation" in name) or (" impl" in name)
+    if pf == "cubes":
+        return ("[cubes]" in name) or ("cubes" in name)
     if pf == "specific":
         allowed = [p.lower() for p in (user.get("allowed_projects") or [])]
-        return project_name.lower() in allowed
-    return pf in project_name.lower()
+        return name in allowed
+    return pf in name
 
 
 def filter_projects(user: dict, projects: list) -> list:
