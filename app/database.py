@@ -8,7 +8,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path("data/prism.db")
+# IMPORTANT: use an absolute path anchored to the repo root, not process cwd.
+# Otherwise running uvicorn from a different working directory creates/uses a different DB.
+DB_PATH = (Path(__file__).resolve().parents[1] / "data" / "prism.db")
 
 
 # ── connection ───────────────────────────────────────────────────
