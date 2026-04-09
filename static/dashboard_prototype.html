@@ -9866,45 +9866,10 @@
                               <div style={{ fontSize:11, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--fg)', maxWidth:170 }}>{proj.name}</div>
                               <div style={{ fontSize:10, fontWeight:600, color:phaseColor(shownPct) }}>{shownPct!=null?shownPct+'%':'TBD — click to fill'}</div>
                             </div>
-                            {canEdit && (
-                              <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
-                                <span style={{ fontSize:9, color:'var(--muted)' }}>S</span>
-                                <input type="date" value={proj.summary_start || ''} onClick={e => e.stopPropagation()}
-                                  onChange={e => { e.stopPropagation(); update(n => { n.projects[pi].summary_start = e.target.value || null; }); }}
-                                  style={{ width:105, fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)' }}
-                                  title="Manual Program Summary Start date" />
-                                <span style={{ fontSize:9, color:'var(--muted)' }}>%</span>
-                                <input type="number" min="0" max="100" value={proj.summary_pct ?? ''} onClick={e => e.stopPropagation()}
-                                  onChange={e => { e.stopPropagation(); update(n => { const v=e.target.value; n.projects[pi].summary_pct = v === '' ? null : Math.max(0, Math.min(100, parseFloat(v))); }); }}
-                                  style={{ width:52, fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)' }}
-                                  title="Manual Program Summary % (leave blank to use auto)" />
-                              </div>
-                            )}
-                            <div title="Program Summary End date (manual)" style={{ flexShrink:0 }}>
-                              {canEdit ? (
-                                <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                                  <input type="date" value={proj.summary_end || ''} onClick={e => e.stopPropagation()}
-                                    onChange={e => { e.stopPropagation(); update(n => { n.projects[pi].summary_end = e.target.value || null; }); }}
-                                    style={{ width:105, fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)' }} />
-                                  <button
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      update(n => {
-                                        const pRef = n.projects[pi];
-                                        const wnd = calcProjectWindow(pRef);
-                                        pRef.summary_start = wnd.computedStart || null;
-                                        pRef.summary_end = wnd.computedEnd || null;
-                                        pRef.summary_pct = calcProjectPct(pRef);
-                                      });
-                                    }}
-                                    style={{ fontSize:9, padding:'1px 6px', borderRadius:4, border:'1px solid #16a34a', color:'#16a34a', background:'transparent', cursor:'pointer' }}
-                                    title="Sync from project tasks">↻ Sync</button>
-                                </div>
-                              ) : (
-                                <span style={{ fontSize:9, color:'#6366f1', fontWeight:700, whiteSpace:'nowrap', background:'rgba(99,102,241,.08)', border:'1px solid rgba(99,102,241,.2)', borderRadius:4, padding:'1px 5px' }}>
-                                  {projEnd ? fmt(projEnd) : 'TBD'}
-                                </span>
-                              )}
+                            <div style={{ flexShrink:0 }}>
+                              <span style={{ fontSize:9, color:'#6366f1', fontWeight:700, whiteSpace:'nowrap', background:'rgba(99,102,241,.08)', border:'1px solid rgba(99,102,241,.2)', borderRadius:4, padding:'1px 5px' }}>
+                                {projEnd ? fmt(projEnd) : 'TBD'}
+                              </span>
                             </div>
                           </div>
                           <div style={{ flex:1, position:'relative', height:44 }}>
