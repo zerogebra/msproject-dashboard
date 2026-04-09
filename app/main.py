@@ -43,9 +43,11 @@ load_dotenv()
 
 MPP_ROOT = os.getenv("MPP_ROOT", "./mpp")
 MPXJ_JAR = os.getenv("MPXJ_JAR", "./libs/mpxj-all.jar")
+BASE_DIR = Path(__file__).resolve().parents[1]
+STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="CUBES Project Monitoring API")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 if _JAVA_AVAILABLE:
     reader = MPPReader(MPXJ_JAR)
@@ -134,7 +136,7 @@ auto_seed_db()
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return Path("static/dashboard_prototype.html").read_text(encoding="utf-8")
+    return (STATIC_DIR / "dashboard_prototype.html").read_text(encoding="utf-8")
 
 
 @app.get("/api/portfolio")
