@@ -2690,6 +2690,7 @@
           team_type: p.team_type || 'cubes',
           pending_overrides: p.pending_overrides || 0,
           stakeholder: p.stakeholder || '',
+          requested_by: p.requested_by || null,
           color, progress, health: rag(progress, pEnd, ss[0]), start: ss[0], end: pEnd, items
         };
       });
@@ -2787,6 +2788,10 @@
 
       renameProject: (code, name, callerId) =>
         fetch(`/api/projects/${code}/rename?caller_id=${encodeURIComponent(callerId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+          .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Failed') })),
+
+      updateProjectRequestedBy: (code, requested_by, callerId) =>
+        fetch(`/api/projects/${code}/requested_by?caller_id=${encodeURIComponent(callerId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requested_by }) })
           .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Failed') })),
 
       updateTask: (taskId, data, callerId) =>
@@ -3178,6 +3183,8 @@
       const [fd, setFd] = useState({});
       const [renamingCode, setRenamingCode] = useState(null);
       const [renameVal, setRenameVal] = useState('');
+      const [requestingCode, setRequestingCode] = useState(null);
+      const [requestVal, setRequestVal] = useState('');
       const [generatedPw, setGeneratedPw] = useState(null); // { name, pw }
       // Products state
       const [products, setProducts] = useState([]);
@@ -3348,6 +3355,15 @@
         } catch (e) { onToast(e.message, 'error'); }
       }
 
+      async function doUpdateRequestedBy(code, val) {
+        try {
+          await api.updateProjectRequestedBy(code, val, currentUser.id);
+          onToast('Requested By updated ✓', 'success');
+          setRequestingCode(null);
+          load();
+        } catch (e) { onToast(e.message, 'error'); }
+      }
+
       function RoleBadge({ role, active }) {
         if (!active) return <span className="role-badge rb-inactive">Inactive</span>;
         const cls = role === 'admin' ? 'rb-admin' : role === 'editor' ? 'rb-editor' : 'rb-viewer';
@@ -3450,6 +3466,7 @@
                         <th>Project Name</th>
                         <th>Team</th>
                         <th style={{ width: 90, textAlign: 'center' }}>Progress</th>
+                        <th style={{ minWidth: 160 }}>Requested By</th>
                         <th style={{ width: 150 }}>Actions</th>
                       </tr></thead>
                       <tbody>
@@ -3479,6 +3496,30 @@
                               </span>
                             </td>
                             <td style={{ textAlign: 'center', fontSize: 12 }}>{Math.round(p.progress || 0)}%</td>
+                            <td>
+                              {requestingCode === p.code ? (
+                                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                  <input
+                                    style={{ fontSize: 12, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--brand)', background: 'var(--s2)', color: 'var(--text)', width: 140 }}
+                                    value={requestVal}
+                                    placeholder="Name or team…"
+                                    onChange={e => setRequestVal(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') doUpdateRequestedBy(p.code, requestVal); if (e.key === 'Escape') setRequestingCode(null); }}
+                                    autoFocus
+                                  />
+                                  <button className="adm-save-btn" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => doUpdateRequestedBy(p.code, requestVal)}>Save</button>
+                                  <button className="adm-cancel-btn" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setRequestingCode(null)}>✕</button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 12, color: p.requested_by ? 'var(--fg)' : 'var(--muted)', fontStyle: p.requested_by ? 'normal' : 'italic' }}>
+                                    {p.requested_by || '—'}
+                                  </span>
+                                  <button className="adm-act-btn" style={{ fontSize: 10, padding: '2px 7px' }}
+                                    onClick={() => { setRequestingCode(p.code); setRequestVal(p.requested_by || ''); }}>✎</button>
+                                </div>
+                              )}
+                            </td>
                             <td style={{ display: 'flex', gap: 4 }}>
                               <button className="adm-act-btn" onClick={() => { setRenamingCode(p.code); setRenameVal(p.name); }}>Rename</button>
                               <button className="adm-act-btn del" onClick={() => doDeleteProject(p)}>Delete</button>
@@ -4115,6 +4156,23 @@
       const isEditor = user?.role === 'editor';
       const canComment = isAdmin || isEditor;
 
+      // Requested By — local override map: keyed by project code, only populated after admin edits inline.
+      // Display logic: use this map first (fresh after save), else fall back to p.requested_by from portfolio.
+      const [requestedByMap, setRequestedByMap] = useState({});
+      const [editingRB, setEditingRB] = useState(null); // project code being edited
+      const [rbDraft, setRbDraft] = useState('');
+      const [savingRB, setSavingRB] = useState(false);
+
+      async function saveRequestedBy(code) {
+        setSavingRB(true);
+        try {
+          await api.updateProjectRequestedBy(code, rbDraft, user?.id || '');
+          setRequestedByMap(m => ({ ...m, [code]: rbDraft }));
+          setEditingRB(null);
+        } catch (e) { alert('Failed to save: ' + e.message); }
+        setSavingRB(false);
+      }
+
       // Comments stored in DB — visible to all users
       const [comments, setComments] = useState({});
       const [savingComment, setSavingComment] = useState(false);
@@ -4231,7 +4289,44 @@
                   return (
                     <tr key={p.code} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 10px', fontWeight: 600, borderLeft: `3px solid ${hc}` }}>{p.name}</td>
-                      <td style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>{p.stakeholder || '—'}</td>
+                      <td style={{ padding: '6px 10px', fontSize: 11 }}>
+                        {editingRB === p.code ? (
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <input autoFocus
+                              style={{ fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--brand)', background: 'var(--s2)', color: 'var(--fg)', width: 120 }}
+                              value={rbDraft}
+                              placeholder="Name or team…"
+                              onChange={e => setRbDraft(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveRequestedBy(p.code);
+                                if (e.key === 'Escape') setEditingRB(null);
+                              }} />
+                            <button onClick={() => saveRequestedBy(p.code)} disabled={savingRB}
+                              style={{ padding: '3px 7px', borderRadius: 4, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
+                              {savingRB ? '…' : '✓'}
+                            </button>
+                            <button onClick={() => setEditingRB(null)}
+                              style={{ padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            {(() => {
+                              // Use local map (admin just edited) if present, else fall back to portfolio data
+                              const rbVal = (p.code in requestedByMap) ? requestedByMap[p.code] : (p.requested_by || null);
+                              return (
+                                <span style={{ color: rbVal ? 'var(--fg)' : 'var(--dim)', fontStyle: rbVal ? 'normal' : 'italic' }}>
+                                  {rbVal || '—'}
+                                </span>
+                              );
+                            })()}
+                            {isAdmin && (
+                              <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11, flexShrink: 0 }}
+                                onClick={() => { const cur = (p.code in requestedByMap) ? requestedByMap[p.code] : (p.requested_by || ''); setRbDraft(cur); setEditingRB(p.code); }}
+                                title="Edit Requested By">✎</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: '8px 10px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{p.start ? fmt(p.start) : '—'}</td>
                       <td style={{ padding: '8px 10px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{p.end ? fmt(p.end) : '—'}</td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
@@ -4782,7 +4877,13 @@
                     let d = new Date(t.start + 'T08:00:00'), cnt = 0, e2 = new Date(t.end + 'T23:59:00');
                     while (d <= e2) { if (isWorkingDay(d)) cnt++; d.setDate(d.getDate() + 1); }
                     return (cnt || dur) + 'd';
-                  })() : (dur === 0 ? '—' : (pendingEdit?.duration_days ?? (t.duration_days || dur)) + 'd')}
+                  })() : (() => {
+                    // Priority: stored duration_days (wizard tasks) → calculated span (MPP) → —
+                    const stored = pendingEdit?.duration_days ?? t.duration_days;
+                    if (stored > 0) return stored + 'd';
+                    if (dur > 0) return dur + 'd';
+                    return '—';
+                  })()}
                 </span>
               )}
             </div>
@@ -9707,6 +9808,28 @@
           r[field] = val;
           const cm = buildCodeMap(n);
           autoCalc(r, cm, field);
+          // Cascade: propagate start/end changes to every row that depends on the edited row.
+          // cm holds live object references so updates are visible immediately to later passes.
+          // Up to 10 passes covers deep chains (A→B→C→D…) without risk of infinite loops.
+          const changedCode = rowCode(pi, phi, r.team);
+          let dirty = new Set([changedCode]);
+          for (let pass = 0; pass < 10 && dirty.size; pass++) {
+            const nextDirty = new Set();
+            n.projects.forEach((proj, pj) => {
+              proj.phases.forEach((ph, phj) => {
+                ph.team_rows.forEach((depRow, rj) => {
+                  if (depRow.depends_on && depRow.depends_on.some(d => dirty.has(d.ref))) {
+                    const prevEnd = depRow.end;
+                    autoCalc(depRow, cm, null); // null = fill missing: resolves new depStart then recalcs end
+                    if (depRow.end !== prevEnd) {
+                      nextDirty.add(rowCode(pj, phj, depRow.team));
+                    }
+                  }
+                });
+              });
+            });
+            dirty = nextDirty;
+          }
         });
       }
       function updateRelease(pi, phi, ri, field, val) {
@@ -10050,16 +10173,25 @@
                                         style={{ background:row.start==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.start==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.start==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
                                     : <span style={{ color:row.start==null?'#94a3b8':'var(--fg)' }}>{row.start?fmt(row.start):'—'}</span>}
                               </td>
-                              {/* End (auto from start+days) */}
+                              {/* End (auto from start+days or dep) */}
                               <td style={{ padding:'4px 8px', textAlign:'center' }}>
-                                {canEdit
-                                  ? <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
-                                      <input type="date" defaultValue={row.end??''} key={row.id+'_end_'+row.end}
+                                {(() => {
+                                  // Compute end from dep-driven start + days (Fix A)
+                                  const autoEnd = (startIsAuto && row.days && depStart)
+                                    ? addWorkDays(depStart, row.days - 1) : null;
+                                  const dispEnd = autoEnd || row.end;
+                                  if (canEdit) return (
+                                    <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+                                      <input type="date" defaultValue={dispEnd??''} key={row.id+'_end_'+(dispEnd??'')}
                                         onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'end',v===''?null:v); }}
-                                        style={{ background:row.end==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.end==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.end==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                      {endAuto && <span style={{ color:'#6366f1', fontWeight:700, fontSize:10 }} title="Auto-calculated from Start + Days (you can override)">⟵</span>}
+                                        style={{ background:dispEnd==null?'rgba(99,102,241,.05)':'var(--s2)', border:dispEnd==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:dispEnd==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
+                                      {(endAuto || autoEnd) && <span style={{ color:'#6366f1', fontWeight:700, fontSize:10 }} title="Auto-calculated from Start + Days (you can override)">⟵</span>}
                                     </div>
-                                  : <span style={{ color:row.end==null?'#94a3b8':'var(--fg)' }}>{row.end?fmt(row.end):'—'}</span>}
+                                  );
+                                  return <span style={{ color:dispEnd==null?'#94a3b8':'var(--fg)' }}>
+                                    {dispEnd ? (autoEnd ? <>{fmt(dispEnd)} <span style={{ color:'#f59e0b', fontSize:9 }} title="Auto from dependency">↗</span></> : fmt(dispEnd)) : '—'}
+                                  </span>;
+                                })()}
                               </td>
                               {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
                             </tr>

@@ -211,6 +211,7 @@ def portfolio(username: str = "user"):
                 "pending_overrides": pending_count(name),
                 "stakeholder":      p["stakeholder"] if "stakeholder" in p.keys() else None,
                 "sync_locked":      bool(p["sync_locked"]) if "sync_locked" in p.keys() else False,
+                "requested_by":     p["requested_by"] if "requested_by" in p.keys() else None,
                 "items":            items,
             })
 
@@ -610,6 +611,21 @@ def rename_project(code: str, req: ProjectRename, caller_id: str):
         if not p:
             raise HTTPException(404, "Project not found.")
         conn.execute("UPDATE projects SET name=? WHERE code=?", (req.name, code))
+    return {"status": "ok"}
+
+
+class ProjectRequestedByUpdate(BaseModel):
+    requested_by: str
+
+@app.put("/api/projects/{code}/requested_by")
+def update_project_requested_by(code: str, req: ProjectRequestedByUpdate, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        p = conn.execute("SELECT code FROM projects WHERE code=?", (code,)).fetchone()
+        if not p:
+            raise HTTPException(404, "Project not found.")
+        conn.execute("UPDATE projects SET requested_by=? WHERE code=?", (req.requested_by.strip() or None, code))
     return {"status": "ok"}
 
 
