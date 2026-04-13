@@ -10317,8 +10317,10 @@
                                 {tPct!==null && <div style={{ position:'absolute', left:tPct+'%', top:0, bottom:0, width:2, borderLeft:'2px dashed #ef4444', zIndex:5 }} />}
                                 {pbp && (
                                   <>
-                                    <div style={{ position:'absolute', left:pbp.left+'%', width:pbp.width+'%', top:'15%', height:'70%', background:phaseColor(phPct), opacity:0.12, borderRadius:2 }} />
+                                    {/* Dark progress fill only — no light bg (phase dates are always computed, never admin-confirmed) */}
                                     <div style={{ position:'absolute', left:pbp.left+'%', width:(pbp.width*(phPct||0)/100)+'%', top:'15%', height:'70%', background:phaseColor(phPct), opacity:0.8, borderRadius:2 }} />
+                                    {/* Dashed tail = TBD remainder */}
+                                    <div style={{ position:'absolute', left:(pbp.left + pbp.width*(phPct||0)/100)+'%', right:'2%', top:'47%', borderTop:'1.5px dashed rgba(148,163,184,.4)', pointerEvents:'none' }} />
                                   </>
                                 )}
                               </div>
