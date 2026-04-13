@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="light">
+<html lang="en" class="light" dir="ltr">
 
 <head>
   <meta charset="utf-8" />
@@ -80,7 +80,8 @@
       background: var(--bg);
       color: var(--text);
       font: 13px/1.6 'Segoe UI', system-ui, sans-serif;
-      transition: background .2s, color .2s
+      transition: background .2s, color .2s;
+      direction: ltr
     }
 
     .shell {
@@ -2298,9 +2299,19 @@
     const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-    function rag(pct, end) {
+    function rag(pct, end, start) {
       if (pct >= 100) return 'G';
       if (TODAY > new Date(end) && pct < 100) return 'R';
+      // Compare actual progress to time-based expected progress
+      if (start && end) {
+        const todayStr = TODAY.toISOString().split('T')[0];
+        const tot = Math.max(1, days(start, end));
+        const elap = clamp(days(start, todayStr), 0, tot);
+        const expectedPct = Math.round(elap / tot * 100);
+        if (pct >= expectedPct - 10) return 'G';
+        if (pct >= expectedPct - 25) return 'A';
+        return 'R';
+      }
       return pct >= 50 ? 'G' : pct >= 20 ? 'A' : 'R';
     }
     const ragLabel = r => r === 'G' ? 'On Track' : r === 'A' ? 'At Risk' : 'Delayed';
@@ -2404,6 +2415,28 @@
         });
       }
 
+      return arr;
+    }
+
+    // Recalculate summary row start/end dates from their children (positional — items must be in outline order)
+    function recalcSummaryDates(items) {
+      if (!items || items.length === 0) return items;
+      const arr = items.map(t => ({ ...t }));
+      const maxLevel = Math.max(...arr.map(t => t.level));
+      for (let lv = maxLevel - 1; lv >= 1; lv--) {
+        arr.forEach((t, i) => {
+          if (!t.is_summary || t.level !== lv) return;
+          const children = [];
+          for (let j = i + 1; j < arr.length; j++) {
+            if (arr[j].level <= lv) break;
+            children.push(arr[j]);
+          }
+          if (children.length === 0) return;
+          const starts = children.map(c => c.start).filter(Boolean).sort();
+          const ends   = children.map(c => c.end).filter(Boolean).sort();
+          if (starts.length) arr[i] = { ...arr[i], start: starts[0], end: ends[ends.length - 1] };
+        });
+      }
       return arr;
     }
 
@@ -2615,10 +2648,11 @@
         const raw_items = p.items.map((t, ri) => {
           const startD = t.start.split('T')[0];
           const endD = t.end.split('T')[0];
-          // Use the MPXJ milestone flag from backend; fall back to date equality only for non-summary tasks
-          // (avoids misclassifying 1-day tasks whose start/end happen to share the same date)
-          const isMsFlag = t.is_milestone === true ? true
-            : (!t.is_summary && startD === endD && t.is_milestone !== false);
+          // Milestone detection: explicit flag OR single-day non-summary with no stored duration_days (MPP import).
+          // DB stores is_milestone as integer (0/1), not boolean — use !! to normalise before comparison.
+          // Wizard tasks always store duration_days > 0, so they are never auto-flagged as milestones.
+          const isMsFlag = !!t.is_milestone ? true
+            : (!t.is_summary && startD === endD && !(t.duration_days > 0));
           return {
             ...t,
             start: startD,
@@ -2633,7 +2667,7 @@
           };
         });
         // 2. add WBS numbering
-        const items = addWBS(recalcSummaryPcts(raw_items));
+        const items = addWBS(recalcSummaryDates(recalcSummaryPcts(raw_items)));
         const rootItem = items.find(t => t.is_project_root);
 
         // Project-level % = duration-weighted average of all leaf tasks.
@@ -2656,7 +2690,7 @@
           team_type: p.team_type || 'cubes',
           pending_overrides: p.pending_overrides || 0,
           stakeholder: p.stakeholder || '',
-          color, progress, health: rag(progress, pEnd), start: ss[0], end: pEnd, items
+          color, progress, health: rag(progress, pEnd, ss[0]), start: ss[0], end: pEnd, items
         };
       });
     }
@@ -2774,7 +2808,13 @@
         fetch('/api/projects/wizard', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
-        }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Failed') })),
+        }).then(r => r.ok ? r.json() : r.json().then(e => {
+          const det = e.detail;
+          const msg = Array.isArray(det)
+            ? det.map(d => `${(d.loc || []).slice(-1)[0] || 'field'}: ${d.msg}`).join('\n')
+            : (typeof det === 'string' ? det : JSON.stringify(det) || 'Failed');
+          throw new Error(msg);
+        })),
 
       clearAudit: (callerId) =>
         fetch(`/api/audit?caller_id=${encodeURIComponent(callerId)}`, { method: 'DELETE' })
@@ -4085,28 +4125,64 @@
       });
       const [showFilter, setShowFilter] = useState(false);
 
-      // Load comments from DB on mount
+      // Load comments from DB — refetch when user or visible portfolio changes (cross-user sync, no stale cache)
+      const commentsReloadKey = `${user?.id || ''}|${projects.map(p => p.code).sort().join('\u001f')}`;
+
+      function applyCommentsPayload(data) {
+        const flat = {};
+        if (data && typeof data === 'object') {
+          Object.entries(data).forEach(([code, v]) => {
+            if (v && typeof v === 'object' && 'comment' in v) flat[code] = v.comment;
+          });
+        }
+        setComments(flat);
+      }
+
       useEffect(() => {
-        fetch('/api/project-comments')
-          .then(r => r.json())
-          .then(data => {
-            // data = { projectCode: { comment, updated_by, updated_at }, ... }
-            const flat = {};
-            Object.entries(data).forEach(([code, v]) => { flat[code] = v.comment; });
-            setComments(flat);
-          })
-          .catch(() => {});
-      }, []);
+        if (!user) return;
+        let cancelled = false;
+        function loadComments() {
+          return fetch('/api/project-comments', { cache: 'no-store', credentials: 'same-origin' })
+            .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+            .then(data => { if (!cancelled) applyCommentsPayload(data); })
+            .catch(() => {});
+        }
+        loadComments();
+        // Keep all sessions aligned when another user saves (same DB)
+        const poll = setInterval(loadComments, 15000);
+        function onVis() { if (document.visibilityState === 'visible') loadComments(); }
+        function onFocus() { loadComments(); }
+        document.addEventListener('visibilitychange', onVis);
+        window.addEventListener('focus', onFocus);
+        return () => {
+          cancelled = true;
+          clearInterval(poll);
+          document.removeEventListener('visibilitychange', onVis);
+          window.removeEventListener('focus', onFocus);
+        };
+      }, [commentsReloadKey]);
 
       async function saveComment(projectCode, text) {
         setSavingComment(true);
         try {
-          await fetch(`/api/project-comments/${encodeURIComponent(projectCode)}?caller_id=${user?.id || ''}`, {
+          const res = await fetch(`/api/project-comments/${encodeURIComponent(projectCode)}?caller_id=${user?.id || ''}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
+            credentials: 'same-origin',
             body: JSON.stringify({ comment: text })
           });
-          setComments(c => ({ ...c, [projectCode]: text }));
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || res.statusText || 'Save failed');
+          }
+          const r2 = await fetch('/api/project-comments', { cache: 'no-store', credentials: 'same-origin' });
+          if (r2.ok) {
+            const data = await r2.json();
+            applyCommentsPayload(data);
+          } else {
+            setComments(c => ({ ...c, [projectCode]: text }));
+          }
           setEditingComment(null);
         } catch (e) {
           alert('Failed to save comment: ' + e.message);
@@ -4122,6 +4198,8 @@
       }
 
       if (!projects.length) return null;
+
+      const ltrCell = { direction: 'ltr', unicodeBidi: 'isolate' };
 
       const healthOrder = { R: 0, A: 1, G: 2 };
       const healthColor = h => h === 'G' ? 'var(--g)' : h === 'A' ? 'var(--a)' : 'var(--r)';
@@ -4198,13 +4276,16 @@
                           {p.health === 'G' ? '🟢' : p.health === 'A' ? '🟡' : '🔴'} {hl.split(' ')[1]}
                         </span>
                       </td>
-                      <td style={{ padding: '5px 10px', minWidth: 200 }}>
+                      <td dir="ltr" style={{ padding: '5px 10px', minWidth: 200, ...ltrCell }}>
                         {isEditingThis ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <textarea autoFocus rows={3}
-                              style={{ flex: 1, fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5 }}
+                          <div dir="ltr" style={{ display: 'flex', flexDirection: 'column', gap: 4, ...ltrCell }}>
+                            <textarea autoFocus rows={3} dir="ltr" lang="en" spellCheck="true"
+                              style={{ flex: 1, fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5, textAlign: 'left', direction: 'ltr', unicodeBidi: 'isolate' }}
                               value={commentDraft} onChange={e => setCommentDraft(e.target.value)}
+                              onFocus={e => { e.target.setAttribute('dir', 'ltr'); e.target.style.direction = 'ltr'; }}
                               onKeyDown={e => {
+                                // Block Windows Ctrl+Shift / Alt+Shift text-direction flip shortcut
+                                if (e.shiftKey && (e.ctrlKey || e.altKey) && !e.key.startsWith('Enter')) { e.preventDefault(); e.target.setAttribute('dir','ltr'); return; }
                                 if (e.key === 'Enter' && !e.altKey) { e.preventDefault(); saveComment(p.code, commentDraft); }
                                 if (e.key === 'Enter' && e.altKey) { setCommentDraft(d => d + '\n'); }
                                 if (e.key === 'Escape') setEditingComment(null);
@@ -4217,8 +4298,8 @@
                             </div>
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minHeight: 26 }}>
-                            <span style={{ flex: 1, fontSize: 11, color: comment ? 'var(--text)' : 'var(--dim)', fontStyle: comment ? 'normal' : 'italic', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                          <div dir="ltr" style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minHeight: 26, ...ltrCell }}>
+                            <span dir="ltr" style={{ flex: 1, fontSize: 11, color: comment ? 'var(--text)' : 'var(--dim)', fontStyle: comment ? 'normal' : 'italic', whiteSpace: 'pre-wrap', lineHeight: 1.5, textAlign: 'left', direction: 'ltr', unicodeBidi: 'isolate' }}>
                               {comment || (canComment ? 'Click ✎ to add comment…' : '—')}
                             </span>
                             {canComment && <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11, flexShrink: 0, marginTop: 1 }}
@@ -4243,7 +4324,7 @@
         }
 
       return (
-        <div style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 18 }}>
+        <div dir="ltr" style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 18, direction: 'ltr', unicodeBidi: 'isolate' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', cursor: 'pointer', userSelect: 'none' }}
             onClick={() => setOpen(o => !o)}>
             <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>📊 Executive Summary</span>
@@ -4384,7 +4465,7 @@
     }
 
     // ── TASK ROW (with inline editor) ────────────────────────────────
-    function TaskRow({ t, p, idx, totalRows, onSaved, onToast, user, onRequestChange, onOpenDetails, colVis, isDeactivated, onReactivate, onHideRow, planEditMode, pendingEdit, allTasksForPred, onPlanStartEdit, onDurationEdit, onPredecessorChange, onPredRelChange }) {
+    function TaskRow({ t, p, idx, totalRows, onSaved, onToast, user, onRequestChange, onOpenDetails, colVis, isDeactivated, onReactivate, onHideRow, planEditMode, pendingEdit, allTasksForPred, onPlanStartEdit, onDurationEdit, onPredecessorChange, onPredRelChange, isCollapsed, onToggleCollapse }) {
       const [editing, setEditing] = useState(false);
       const [val, setVal] = useState(Math.round(t.pct));
       const [saving, setSaving] = useState(false);
@@ -4401,9 +4482,10 @@
 
       const isMs = t.is_milestone;
       const isRoot = t.level === 1;
-      // Admins can edit any task (including 100%). Non-admins are blocked at 100%.
+      // Admins can edit any task (including 100% and phase/summary rows). Non-admins are blocked at 100%.
       const isLocked = !isAdmin && !isRoot && !t.is_summary && t.pct >= 100;
-      const isEditable = canEdit && !isRoot && !t.is_summary && (t.pct < 100 || isAdmin);
+      // Admins can edit phase (summary) rows directly; non-admins cannot
+      const isEditable = canEdit && !isRoot && (isAdmin || (!t.is_summary && t.pct < 100));
       const rowCls = isRoot ? 'tr-root' : t.is_summary ? 'tr-phase' : isMs ? 'tr-ms' : 'tr-task';
       const st = (!t.is_summary && !isMs) ? taskSt(t) : (t.pct >= 100 ? { l: 'Completed', c: 'sc-done' } : null);
       const stReason = (!t.is_summary && !isMs && st) ? taskStReason(t, st) : '';
@@ -4456,16 +4538,16 @@
         try {
           await api.saveOverride(p.name, t.title, v, t.original_pct, user?.username);
 
-          // Auto-sync % to the paired [Imp] project when saving a [Cubes] leaf task
+          // Auto-sync % to the paired [Imp] project when saving any [Cubes] task (leaf OR phase)
           const cubesMatch = p.name.match(/^(.*)\s*\[Cubes\]$/i);
-          if (cubesMatch && !t.is_summary && !t.is_milestone) {
+          if (cubesMatch && !t.is_milestone) {
             const baseName = cubesMatch[1].trim();
             const allProjects = window.__allProjects || [];
             const impProject = allProjects.find(
               x => x.name.match(new RegExp('^' + baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\[Imp\\]$', 'i'))
             );
             if (impProject) {
-              const impTask = impProject.items.find(it => it.title === t.title && !it.is_summary && !it.is_milestone);
+              const impTask = impProject.items.find(it => it.title === t.title);
               if (impTask) {
                 try {
                   await api.saveOverride(impProject.name, impTask.title, v, impTask.original_pct, user?.username);
@@ -4666,7 +4748,13 @@
           <td style={{ minWidth: 260, maxWidth: 340 }}>
             <div className="name-cell">
               <span className="tree-conn">{treePrefix()}</span>
-              <span className="row-icon" style={{ color: isMs || t.is_summary ? p.color : 'var(--dim)' }}>{isMs ? '◆' : t.is_summary ? '▼' : '·'}</span>
+              {onToggleCollapse ? (
+                <span className="row-icon" style={{ color: p.color, cursor: 'pointer', userSelect: 'none' }} onClick={e => { e.stopPropagation(); onToggleCollapse(); }} title={isCollapsed ? 'Expand phase' : 'Collapse phase'}>
+                  {isCollapsed ? '▶' : '▼'}
+                </span>
+              ) : (
+                <span className="row-icon" style={{ color: isMs || t.is_summary ? p.color : 'var(--dim)' }}>{isMs ? '◆' : t.is_summary ? '▼' : '·'}</span>
+              )}
               <span className="row-name" title={t.title} style={deactivatedStyle}>
                 {t.title} {t.is_critical && !isDeactivated && <span style={{ color: 'var(--r)', fontSize: 10, marginLeft: 4 }}>[CRITICAL]</span>}
                 {isDeactivated && <span style={{ fontSize: 9, color: 'var(--r)', marginLeft: 6, fontStyle: 'italic', textDecoration: 'none' }}>deactivated
@@ -4688,7 +4776,13 @@
                 />
               ) : (
                 <span style={{ color: pendingEdit?.duration_days ? 'var(--a)' : 'var(--muted)', fontWeight: pendingEdit?.duration_days ? 700 : 400, ...deactivatedStyle }}>
-                  {isMs || dur === 0 ? '—' : (pendingEdit?.duration_days ?? dur) + 'd'}
+                  {isMs ? '—' : t.is_summary ? (() => {
+                    // Summary rows: count working days in span
+                    if (!t.start || !t.end) return dur + 'd';
+                    let d = new Date(t.start + 'T08:00:00'), cnt = 0, e2 = new Date(t.end + 'T23:59:00');
+                    while (d <= e2) { if (isWorkingDay(d)) cnt++; d.setDate(d.getDate() + 1); }
+                    return (cnt || dur) + 'd';
+                  })() : (dur === 0 ? '—' : (pendingEdit?.duration_days ?? (t.duration_days || dur)) + 'd')}
                 </span>
               )}
             </div>
@@ -5042,10 +5136,35 @@
         localStorage.removeItem(hiddenKey);
       }
 
-      const visItems = allItems.filter(t => !hiddenRows.includes(t.id || t.title));
+      // Expand/collapse phases
+      const collapseKey = `collapsedPhases_${p.code}`;
+      const [collapsedPhases, setCollapsedPhases] = useState(() => {
+        try { return new Set(JSON.parse(localStorage.getItem(collapseKey) || '[]')); } catch { return new Set(); }
+      });
+      function togglePhase(title) {
+        setCollapsedPhases(prev => {
+          const next = new Set(prev);
+          next.has(title) ? next.delete(title) : next.add(title);
+          localStorage.setItem(collapseKey, JSON.stringify([...next]));
+          return next;
+        });
+      }
+      // Determine which child tasks are hidden because their parent phase is collapsed
+      const collapsedSet = React.useMemo(() => {
+        const hidden = new Set();
+        let colLv = null;
+        for (const t of allItems) {
+          if (t.is_summary && !t.is_project_root && collapsedPhases.has(t.title)) { colLv = t.level; }
+          else if (colLv !== null && t.level > colLv) { hidden.add(t.id || t.title); }
+          else { colLv = null; }
+        }
+        return hidden;
+      }, [allItems, collapsedPhases]);
+
+      const visItems = allItems.filter(t => !hiddenRows.includes(t.id || t.title) && !collapsedSet.has(t.id || t.title));
       const msCount = visItems.filter(t => t.is_milestone).length;
       const summaryCount = visItems.filter(t => t.is_summary).length;
-      const taskCount = visItems.filter(t => !t.is_summary && t.start !== t.end).length;
+      const taskCount = visItems.filter(t => !t.is_summary && !t.is_milestone).length;
 
       // Per-table column picker — user overrides on top of admin defaults
       const COL_DEFS = [
@@ -5257,7 +5376,9 @@
                     onPlanStartEdit={handlePlanStartEdit}
                     onDurationEdit={handleDurationEdit}
                     onPredecessorChange={handlePredecessorChange}
-                    onPredRelChange={handlePredRelChange} />
+                    onPredRelChange={handlePredRelChange}
+                    isCollapsed={t.is_summary && collapsedPhases.has(t.title)}
+                    onToggleCollapse={t.is_summary && !t.is_project_root ? () => togglePhase(t.title) : null} />
                 ))}
               </tbody>
             </table>
@@ -5716,6 +5837,9 @@
     // overlapBeFe:   0 = sequential (BE→FE FS),    1-90 = % of BE done when FE starts
     function generateCubesPlan(startDateStr, disciplines, overlapBaUiux, overlapBeFe) {
       const tasks = [];
+      if (!startDateStr) return tasks;
+      const yr = parseInt((startDateStr || '').split('-')[0], 10);
+      if (!yr || yr < 2020 || yr > 2035) return tasks;
       const startDate = new Date(startDateStr + 'T08:00:00');
 
       const baD  = disciplines.BA?.days    || 0;   const baR  = disciplines.BA?.resources    || 1;
@@ -5782,52 +5906,100 @@
       if (beD > 0) tasks.push({ title: 'Backend Development (BE)', level: 3, start: fmtDate(beStart), end: fmtDate(beEnd), role: 'BE', resources: beR, duration_days: beD, predecessor: 'UI/UX Design' });
       if (feD > 0) tasks.push({ title: 'Frontend Development (FE)', level: 3, start: fmtDate(feStart), end: fmtDate(feEnd), role: 'FE', resources: feR, duration_days: feD, predecessor: 'Backend Development (BE)' });
       // Development Complete depends on the last development task (FE if present, else BE)
-      tasks.push({ title: 'Development Complete', level: 3, is_milestone: true, start: fmtDate(p2End), end: fmtDate(p2End), predecessor: feD > 0 ? 'Frontend Development (FE)' : 'Backend Development (BE)' });
+      const devCompletePred = feD > 0 ? 'Frontend Development (FE)' : 'Backend Development (BE)';
+      tasks.push({ title: 'Development Complete', level: 3, is_milestone: true, start: fmtDate(p2End), end: fmtDate(p2End), predecessor: devCompletePred });
 
       // ── Phase 3: Testing & QC ─────────────────────────────────────────
       // QC Preparation is anchored to UI/UX end (cross-phase) — runs during Development
       const qcPrepStart = addWorkDays(uxEnd, 1);
-      const qcPrepEnd   = addWorkDays(qcPrepStart, qcPrep - 1);
+      const qcPrepEnd   = qcPrep > 0 ? addWorkDays(qcPrepStart, qcPrep - 1) : qcPrepStart;
 
-      // QC Execution starts after BOTH Dev Complete AND QC Prep are done
       const qcExecReady = new Date(Math.max(p2End.getTime(), qcPrepEnd.getTime()));
-      const cyc1Start   = addWorkDays(qcExecReady, 1);
-      const cyc1End     = addWorkDays(cyc1Start, cyc1D - 1);
+      const allTeamRes = Math.max(1, beR, feR, qcR);
 
-      const df1Start = addWorkDays(cyc1End, 1);
-      const df1End   = addWorkDays(df1Start, df1D - 1);
+      let tail = qcExecReady;
+      let cyc1Start = null, cyc1End = null;
+      let df1Start = null, df1End = null;
+      let cyc2Start = null, cyc2End = null;
+      let df2Start = null, df2End = null;
+      let regStart = null, regEnd = null;
 
-      const cyc2Start = addWorkDays(df1End, 1);
-      const cyc2End   = addWorkDays(cyc2Start, cyc2D - 1);
-
-      const df2Start = addWorkDays(cyc2End, 1);
-      const df2End   = addWorkDays(df2Start, df2D - 1);
-
-      const regStart = addWorkDays(df2End, 1);
-      const regEnd   = addWorkDays(regStart, regD - 1);
+      if (cyc1D > 0) {
+        cyc1Start = addWorkDays(tail, 1);
+        cyc1End = addWorkDays(cyc1Start, cyc1D - 1);
+        tail = cyc1End;
+      }
+      if (df1D > 0) {
+        df1Start = addWorkDays(tail, 1);
+        df1End = addWorkDays(df1Start, df1D - 1);
+        tail = df1End;
+      }
+      if (cyc2D > 0) {
+        cyc2Start = addWorkDays(tail, 1);
+        cyc2End = addWorkDays(cyc2Start, cyc2D - 1);
+        tail = cyc2End;
+      }
+      if (df2D > 0) {
+        df2Start = addWorkDays(tail, 1);
+        df2End = addWorkDays(df2Start, df2D - 1);
+        tail = df2End;
+      }
+      if (regD > 0) {
+        regStart = addWorkDays(tail, 1);
+        regEnd = addWorkDays(regStart, regD - 1);
+        tail = regEnd;
+      }
 
       const p3Start = new Date(Math.min(qcPrepStart.getTime(), p2Start.getTime()));
-      const p3End   = new Date(regEnd);
+      const p3End   = regEnd ? new Date(regEnd) : new Date(Math.max(qcPrepEnd.getTime(), tail.getTime()));
 
       tasks.push({ title: 'Phase 3: Testing & QC', level: 2, is_summary: true, start: fmtDate(p3Start), end: fmtDate(p3End) });
-      tasks.push({ title: 'QC Preparation', level: 3, start: fmtDate(qcPrepStart), end: fmtDate(qcPrepEnd), role: 'QC', resources: 1, duration_days: qcPrep, predecessor: 'UI/UX Design' });
-      // QC Execution: single predecessor = Development Complete (the later gate); QC Prep runs in parallel
-      tasks.push({ title: 'QC Execution Cycle 1', level: 3, start: fmtDate(cyc1Start), end: fmtDate(cyc1End), role: 'QC', resources: qcR, duration_days: cyc1D, predecessor: 'Development Complete' });
-      tasks.push({ title: 'Defect Fixing (Cycle 1)', level: 3, start: fmtDate(df1Start), end: fmtDate(df1End), role: 'BE', resources: beR, duration_days: df1D, predecessor: 'QC Execution Cycle 1' });
-      tasks.push({ title: 'QC Execution Cycle 2', level: 3, start: fmtDate(cyc2Start), end: fmtDate(cyc2End), role: 'QC', resources: qcR, duration_days: cyc2D, predecessor: 'Defect Fixing (Cycle 1)' });
-      tasks.push({ title: 'Defect Fixing (Cycle 2)', level: 3, start: fmtDate(df2Start), end: fmtDate(df2End), role: 'BE', resources: beR, duration_days: df2D, predecessor: 'QC Execution Cycle 2' });
-      tasks.push({ title: 'Regression + Retest', level: 3, start: fmtDate(regStart), end: fmtDate(regEnd), role: 'QC', resources: qcR, duration_days: regD, predecessor: 'Defect Fixing (Cycle 2)' });
+      if (qcPrep > 0) {
+        const prepPred = uxD > 0 ? 'UI/UX Design' : (baD > 0 ? 'Business Analysis (BA)' : 'Phase 1: Requirements & Analysis');
+        tasks.push({ title: 'QC Preparation', level: 3, start: fmtDate(qcPrepStart), end: fmtDate(qcPrepEnd), role: 'QC', resources: 1, duration_days: qcPrep, predecessor: prepPred });
+      }
+      const predCyc1 = 'Development Complete';
+      if (cyc1D > 0) {
+        tasks.push({ title: 'QC Execution Cycle 1', level: 3, start: fmtDate(cyc1Start), end: fmtDate(cyc1End), role: 'QC', resources: qcR, duration_days: cyc1D, predecessor: predCyc1 });
+      }
+      const predDf1 = cyc1D > 0 ? 'QC Execution Cycle 1' : predCyc1;
+      if (df1D > 0) {
+        tasks.push({ title: 'Defect Fixing (Cycle 1)', level: 3, start: fmtDate(df1Start), end: fmtDate(df1End), role: 'ALL', resources: allTeamRes, duration_days: df1D, predecessor: predDf1 });
+      }
+      const predCyc2 = df1D > 0 ? 'Defect Fixing (Cycle 1)' : (cyc1D > 0 ? 'QC Execution Cycle 1' : predCyc1);
+      if (cyc2D > 0) {
+        tasks.push({ title: 'QC Execution Cycle 2', level: 3, start: fmtDate(cyc2Start), end: fmtDate(cyc2End), role: 'QC', resources: qcR, duration_days: cyc2D, predecessor: predCyc2 });
+      }
+      const predDf2 = cyc2D > 0 ? 'QC Execution Cycle 2' : (df1D > 0 ? 'Defect Fixing (Cycle 1)' : predCyc2);
+      if (df2D > 0) {
+        tasks.push({ title: 'Defect Fixing (Cycle 2)', level: 3, start: fmtDate(df2Start), end: fmtDate(df2End), role: 'ALL', resources: allTeamRes, duration_days: df2D, predecessor: predDf2 });
+      }
+      const predReg = df2D > 0 ? 'Defect Fixing (Cycle 2)' : (cyc2D > 0 ? 'QC Execution Cycle 2' : (df1D > 0 ? 'Defect Fixing (Cycle 1)' : (cyc1D > 0 ? 'QC Execution Cycle 1' : predCyc1)));
+      if (regD > 0) {
+        tasks.push({ title: 'Regression + Retest', level: 3, start: fmtDate(regStart), end: fmtDate(regEnd), role: 'QC', resources: qcR, duration_days: regD, predecessor: predReg });
+      }
+
+      let lastPhase3ForPR = 'Development Complete';
+      if (regD > 0) lastPhase3ForPR = 'Regression + Retest';
+      else if (df2D > 0) lastPhase3ForPR = 'Defect Fixing (Cycle 2)';
+      else if (cyc2D > 0) lastPhase3ForPR = 'QC Execution Cycle 2';
+      else if (df1D > 0) lastPhase3ForPR = 'Defect Fixing (Cycle 1)';
+      else if (cyc1D > 0) lastPhase3ForPR = 'QC Execution Cycle 1';
+      else if (qcPrep > 0) lastPhase3ForPR = 'QC Preparation';
 
       // ── Phase 4: Deployment & Go-Live ─────────────────────────────────
       const p4Start = addWorkDays(p3End, 1);
       const prStart = new Date(p4Start);
-      const prEnd   = addWorkDays(prStart, Math.ceil(prD) - 1);
-      const glDate  = addWorkDays(prEnd, 1);
+      const prEnd   = prD > 0 ? addWorkDays(prStart, Math.ceil(prD) - 1) : new Date(p4Start);
+      const glDate  = prD > 0 ? addWorkDays(prEnd, 1) : new Date(p4Start);
       const p4End   = new Date(glDate);
 
       tasks.push({ title: 'Phase 4: Deployment & Go-Live', level: 2, is_summary: true, start: fmtDate(p4Start), end: fmtDate(p4End) });
-      tasks.push({ title: 'Production Release Preparation', level: 3, start: fmtDate(prStart), end: fmtDate(prEnd), duration_days: prD, predecessor: 'Regression + Retest' });
-      tasks.push({ title: 'Go-Live', level: 3, is_milestone: true, start: fmtDate(p4End), end: fmtDate(p4End), predecessor: 'Production Release Preparation' });
+      if (prD > 0) {
+        tasks.push({ title: 'Production Release Preparation', level: 3, start: fmtDate(prStart), end: fmtDate(prEnd), duration_days: prD, predecessor: lastPhase3ForPR });
+      }
+      const goLivePred = prD > 0 ? 'Production Release Preparation' : lastPhase3ForPR;
+      tasks.push({ title: 'Go-Live', level: 3, is_milestone: true, start: fmtDate(p4End), end: fmtDate(p4End), predecessor: goLivePred });
 
       return tasks;
     }
@@ -5880,10 +6052,29 @@
       const [implMargin, setImplMargin] = useState(20);
       // Track which disciplines are already completed (will create tasks at 100%)
       const [completedPhases, setCompletedPhases] = useState(new Set());
+      // Store original days before "done" override so we can restore when unchecked
+      const [savedDays, setSavedDays] = useState({});
       function toggleCompleted(role) {
         setCompletedPhases(prev => {
           const next = new Set(prev);
-          next.has(role) ? next.delete(role) : next.add(role);
+          if (next.has(role)) {
+            // Un-marking as done: restore previous days
+            next.delete(role);
+            setSavedDays(sd => {
+              const copy = { ...sd };
+              if (copy[role] != null) {
+                setDiscs(d => ({ ...d, [role]: { ...d[role], days: copy[role] } }));
+                delete copy[role];
+              }
+              return copy;
+            });
+          } else {
+            // Marking as done: save current days, set to 1
+            next.add(role);
+            const currentDays = disciplines[role]?.days ?? 1;
+            setSavedDays(sd => ({ ...sd, [role]: currentDays }));
+            setDiscs(d => ({ ...d, [role]: { ...d[role], days: 1 } }));
+          }
           return next;
         });
       }
@@ -5911,21 +6102,33 @@
         });
       }
 
+      // schedulingDisciplines: always use full original days so ALL tasks are generated.
+      // Done phases are kept at their configured duration — they appear in the project at 100%
+      // (buildPayload marks pct=100 for done roles). Zeroing them out caused tasks to be
+      // omitted entirely, which was wrong.
+      const schedulingDisciplines = React.useMemo(() => ({
+        BA:   { ...disciplines.BA },
+        UIUX: { ...disciplines.UIUX },
+        BE:   { ...disciplines.BE },
+        FE:   { ...disciplines.FE },
+        QC:   { ...disciplines.QC },
+      }), [disciplines]);
+
       const generatedTasks = React.useMemo(() => {
         if (!startDate) return [];
-        return generateCubesPlan(startDate, disciplines, overlapBaUiux, overlapBeFe);
-      }, [startDate, disciplines, overlapBaUiux, overlapBeFe]);
+        return generateCubesPlan(startDate, schedulingDisciplines, overlapBaUiux, overlapBeFe);
+      }, [startDate, schedulingDisciplines, overlapBaUiux, overlapBeFe]);
 
       const generatedTasksImpl = React.useMemo(() => {
         if (!startDate) return [];
-        return generateImplPlan(startDate, disciplines, overlapBaUiux, overlapBeFe, implMargin);
-      }, [startDate, disciplines, overlapBaUiux, overlapBeFe, implMargin]);
+        return generateImplPlan(startDate, schedulingDisciplines, overlapBaUiux, overlapBeFe, implMargin);
+      }, [startDate, schedulingDisciplines, overlapBaUiux, overlapBeFe, implMargin]);
 
       function setDays(role, v) {
-        setDiscs(d => ({ ...d, [role]: { ...d[role], days: Math.max(0.5, Number(v) || 0.5) } }));
+        setDiscs(d => ({ ...d, [role]: { ...d[role], days: Math.max(0, Number(v)) || 0 } }));
       }
       function setQcField(field, v) {
-        setDiscs(d => ({ ...d, QC: { ...d.QC, [field]: Math.max(0.5, Number(v) || 0.5) } }));
+        setDiscs(d => ({ ...d, QC: { ...d.QC, [field]: Math.max(0, Number(v)) || 0 } }));
       }
       function setRes(role, delta) {
         setDiscs(d => ({ ...d, [role]: { ...d[role], resources: Math.max(1, (d[role].resources || 1) + delta) } }));
@@ -5933,6 +6136,81 @@
 
       const projEnd = generatedTasks.length ? generatedTasks[generatedTasks.length - 1].end : startDate;
       const implEnd = generatedTasksImpl.length ? generatedTasksImpl[generatedTasksImpl.length - 1].end : startDate;
+
+      function removeWizardTask(t) {
+        if (!t || t.is_summary || t.is_milestone) return;
+        if (t.title === 'Business Analysis (BA)') { setDays('BA', 0); return; }
+        if (t.title === 'UI/UX Design') { setDays('UIUX', 0); return; }
+        if (t.title.includes('Backend Development')) { setDays('BE', 0); return; }
+        if (t.title.includes('Frontend Development')) { setDays('FE', 0); return; }
+        if (t.title === 'QC Preparation') { setQcField('prepDays', 0); return; }
+        if (t.title.includes('QC Execution Cycle 1')) { setQcField('cyc1Days', 0); return; }
+        if (t.title.includes('QC Execution Cycle 2')) { setQcField('cyc2Days', 0); return; }
+        if (t.title.includes('Defect Fixing (Cycle 1)')) { setQcField('df1Days', 0); return; }
+        if (t.title.includes('Defect Fixing (Cycle 2)')) { setQcField('df2Days', 0); return; }
+        if (t.title.includes('Regression')) { setQcField('regDays', 0); return; }
+        if (t.title.includes('Production Release')) { setQcField('prDays', 0); return; }
+      }
+
+      // Per-task date overrides for the Review step (applied on top of generated schedule)
+      const [dateOverrides, setDateOverrides] = useState({});
+      function setTaskDateOverride(title, field, value) {
+        setDateOverrides(prev => ({ ...prev, [title]: { ...(prev[title] || {}), [field]: value } }));
+      }
+      function clearDateOverrides() { setDateOverrides({}); }
+
+      // reviewTasks: generatedTasks with dateOverrides applied for display
+      const reviewTasks = React.useMemo(() => {
+        return generatedTasks.map(t => {
+          const ov = dateOverrides[t.title];
+          if (!ov) return t;
+          return { ...t, start: ov.start || t.start, end: ov.end || t.end };
+        });
+      }, [generatedTasks, dateOverrides]);
+
+      function isValidDate(d) { const yr = parseInt((d||'').split('-')[0],10); return yr>=2020 && yr<=2035; }
+      function onReviewEndChange(t, newEnd) {
+        if (!newEnd || !isValidDate(newEnd)) return;
+        const s = (dateOverrides[t.title]?.start) || t.start;
+        if (!s) return;
+        const newDur = Math.max(1, countWorkDays(s, newEnd));
+        // Back-propagate duration → schedule regenerates
+        applyDurationChange(t, newDur);
+        setTaskDateOverride(t.title, 'end', newEnd);
+      }
+      function onReviewStartChange(t, newStart) {
+        if (!newStart || !isValidDate(newStart)) return;
+        // Keep original duration, compute new end = newStart + (originalDays - 1) work days
+        const originalDays = t.duration_days || 1;
+        const newEnd = fmtDateStr(addWorkDaysStr(newStart, originalDays - 1));
+        setTaskDateOverride(t.title, 'start', newStart);
+        setTaskDateOverride(t.title, 'end', newEnd);
+        // If this is the first leaf task, also shift the overall project start
+        if (t.title === 'Business Analysis (BA)') setStartDate(newStart);
+      }
+      function addWorkDaysStr(dateStr, n) {
+        if (!dateStr || n <= 0) return dateStr;
+        const d = new Date(dateStr + 'T08:00:00');
+        let added = 0;
+        while (added < n) { d.setDate(d.getDate() + 1); if (isWorkingDay(d)) added++; }
+        return d.toISOString().split('T')[0];
+      }
+      function fmtDateStr(dateStr) { return dateStr || ''; }
+      function applyDurationChange(t, newDays) {
+        if (t.role === 'BA') setDays('BA', newDays);
+        else if (t.role === 'UIUX') setDays('UIUX', newDays);
+        else if (t.role === 'BE' && t.title.includes('Backend')) setDays('BE', newDays);
+        else if (t.role === 'FE') setDays('FE', newDays);
+        else if (t.role === 'ALL' || t.title.includes('Defect Fixing')) {
+          if (t.title.includes('Cycle 1')) setQcField('df1Days', newDays);
+          else setQcField('df2Days', newDays);
+        }
+        else if (t.title === 'QC Preparation') setQcField('prepDays', newDays);
+        else if (t.title.includes('QC Execution Cycle 1')) setQcField('cyc1Days', newDays);
+        else if (t.title.includes('QC Execution Cycle 2')) setQcField('cyc2Days', newDays);
+        else if (t.title.includes('Regression')) setQcField('regDays', newDays);
+        else if (t.title.includes('Production Release')) setQcField('prDays', newDays);
+      }
 
       function countWorkDays(from, to) {
         if (!from || !to) return 0;
@@ -5947,17 +6225,24 @@
         const allocations = {};
         Object.entries(disciplines).forEach(([role, v]) => { allocations[role] = v.resources || 1; });
         // Merge generated tasks + any custom rows added by admin
+        // Apply dateOverrides as final overrides on the CUBES plan (for impl plan, no overrides)
+        const isCubes = teamType === 'cubes';
         const allTasks = [
-          ...tasks.map(t => ({
-            title: t.title, outline_level: t.level || 3,
-            is_summary: !!t.is_summary, is_milestone: !!t.is_milestone,
-            start_date: t.start ? t.start + 'T08:00' : startDate + 'T08:00',
-            end_date:   t.end   ? t.end   + 'T17:00' : startDate + 'T17:00',
-            pct: (t.role && completedPhases.has(t.role)) ? 100 : 0,
-            role: t.role || null,
-            resources: t.resources || 1, duration_days: t.duration_days || 0,
-            predecessor: t.predecessor || null,
-          })),
+          ...tasks.map(t => {
+            const ov = (isCubes && dateOverrides[t.title]) || {};
+            const finalStart = ov.start || t.start;
+            const finalEnd = ov.end || t.end;
+            return {
+              title: t.title, outline_level: t.level || 3,
+              is_summary: !!t.is_summary, is_milestone: !!t.is_milestone,
+              start_date: finalStart ? finalStart + 'T08:00' : startDate + 'T08:00',
+              end_date:   finalEnd   ? finalEnd   + 'T17:00' : startDate + 'T17:00',
+              pct: (t.role && (completedPhases.has(t.role) || (t.role === 'ALL' && completedPhases.has('QC')))) ? 100 : 0,
+              role: t.role || null,
+              resources: t.resources || 1, duration_days: t.duration_days || 0,
+              predecessor: t.predecessor || null,
+            };
+          }),
           ...customTasks.map(ct => ({
             title: ct.title || 'New Task', outline_level: ct.level || 3,
             is_summary: !!ct.is_summary, is_milestone: !!ct.is_milestone,
@@ -5984,10 +6269,8 @@
         setSaveMsg('Creating CUBES project…');
         try {
           const baseName = name.trim();
-          // Create CUBES project with [Cubes] suffix
-          await api.createWizardProject(buildPayload(generatedTasks, baseName + ' [Cubes]', 'cubes'));
-          setSaveMsg('Creating Implementation project (20% buffer)…');
-          // Auto-create Implementation clone with 20% inflated durations
+          await api.createWizardProject(buildPayload(reviewTasks, baseName + ' [Cubes]', 'cubes'));
+          setSaveMsg('Creating Implementation project…');
           await api.createWizardProject(buildPayload(generatedTasksImpl, baseName + ' [Imp]', 'implementation'));
           onCreated();
           onClose();
@@ -5996,7 +6279,7 @@
         setSaveMsg('');
       }
 
-      const STEPS = ['Project Basics', 'Effort & Team', 'Review Plan'];
+      const STEPS = ['Project Basics', 'Effort & Team', 'Review Plan', 'Final Review'];
 
       return (
         <div className="wiz-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -6048,7 +6331,10 @@
                     </div>
                     <div className="wiz-field">
                       <label>Start Date (Jordan)</label>
-                      <input type="date" className="wiz-input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                      <input type="date" className="wiz-input" min="2020-01-01" max="2035-12-31" value={startDate} onChange={e => {
+                        const yr = parseInt((e.target.value || '').split('-')[0], 10);
+                        if (yr >= 2020 && yr <= 2035) setStartDate(e.target.value);
+                      }} />
                     </div>
                   </div>
 
@@ -6089,155 +6375,185 @@
                       Public holidays are automatically excluded from duration calculations.
                     </div>
                   </div>
+
+                  <div style={{ marginTop: 18, background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)', marginBottom: 10 }}>Already completed? (excluded from schedule in Effort &amp; Review)</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 18px' }}>
+                      {[
+                        { role: 'BA', label: 'BA' },
+                        { role: 'UIUX', label: 'UI/UX' },
+                        { role: 'BE', label: 'BE' },
+                        { role: 'FE', label: 'FE' },
+                        { role: 'QC', label: 'QC (all test phases)' },
+                      ].map(({ role, label }) => (
+                        <label key={role} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: completedPhases.has(role) ? 'var(--g)' : 'var(--muted)', fontWeight: completedPhases.has(role) ? 700 : 500 }}>
+                          <input type="checkbox" checked={completedPhases.has(role)} onChange={() => toggleCompleted(role)} style={{ accentColor: 'var(--g)' }} />
+                          {label}{completedPhases.has(role) ? ' ✓' : ''}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 16, background: 'rgba(249,115,22,.06)', border: '1px solid rgba(249,115,22,.22)', borderRadius: 10, padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>QC — durations (working days)</div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#f97316', background: 'rgba(249,115,22,.12)', padding: '4px 12px', borderRadius: 8 }}>
+                        Total QC block: {(
+                          (Number(disciplines.QC?.prepDays) || 0) + (Number(disciplines.QC?.cyc1Days) || 0) + (Number(disciplines.QC?.cyc2Days) || 0) +
+                          (Number(disciplines.QC?.df1Days) || 0) + (Number(disciplines.QC?.df2Days) || 0) + (Number(disciplines.QC?.regDays) || 0) + (Number(disciplines.QC?.prDays) || 0)
+                        ).toFixed(1)} d
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {[
+                        { field: 'cyc1Days', label: 'QC Execution Cycle 1' },
+                        { field: 'cyc2Days', label: 'QC Execution Cycle 2' },
+                        { field: 'prepDays', label: 'QC Preparation' },
+                        { field: 'df1Days', label: 'Defect Fixing Cycle 1' },
+                        { field: 'df2Days', label: 'Defect Fixing Cycle 2' },
+                        { field: 'regDays', label: 'Regression + Retest' },
+                        { field: 'prDays', label: 'Prod. Release Prep' },
+                      ].map(f => (
+                        <div key={f.field} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 200, flex: '1 1 180px' }}>{f.label}</span>
+                          <input type="number" min="0" step="0.5" className="disc-num days" style={{ width: 88, minWidth: 88, padding: '6px 10px', fontSize: 13 }}
+                            value={disciplines.QC?.[f.field] ?? 0}
+                            onChange={e => setQcField(f.field, e.target.value)} />
+                          <span style={{ fontSize: 12, color: 'var(--muted)' }}>working days</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>QC resources</span>
+                      <div className="res-counter">
+                        <button type="button" className="res-btn" onClick={() => setRes('QC', -1)}>−</button>
+                        <span className="res-num">{disciplines.QC?.resources || 1}</span>
+                        <button type="button" className="res-btn" onClick={() => setRes('QC', +1)}>+</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 
               {/* ── Step 2: Effort & Team ── */}
               {step === 2 && (
                 <div>
-                  {/* Product Team */}
-                  <div className="disc-section-title">PRODUCT TEAM</div>
-                  <div className="disc-grid">
-                    {[
-                      { role: 'BA',   label: 'Business Analysis', badge: 'BA'   },
-                      { role: 'UIUX', label: 'UI/UX Design',      badge: 'UI/UX'},
-                    ].map(dc => {
-                      const disc = disciplines[dc.role] || { days: 1, resources: 1 };
-                      const totalHrs = disc.days * disc.resources * hoursPerDay;
-                      const isDone = completedPhases.has(dc.role);
-                      return (
-                        <div key={dc.role} className="disc-card" style={isDone ? { opacity: 0.65, outline: '2px solid var(--g)' } : {}}>
-                          <div className="disc-card-top">
-                            <span className="disc-card-name">{dc.label}</span>
-                            <span className="disc-card-badge">{dc.badge}</span>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: isDone ? 'var(--g)' : 'var(--muted)', cursor: 'pointer', marginLeft: 'auto', fontWeight: isDone ? 700 : 400 }}>
-                              <input type="checkbox" checked={isDone} onChange={() => toggleCompleted(dc.role)} style={{ accentColor: 'var(--g)' }} />
-                              {isDone ? '✓ Done' : 'Mark Done'}
-                            </label>
-                          </div>
-                          <div className="disc-inputs">
-                            <div className="disc-input-group" style={{ flex: 2 }}>
-                              <div className="disc-input-label">Duration (days)</div>
-                              <input type="number" min="0.5" step="0.5" className="disc-num days"
-                                value={disc.days} onChange={e => setDays(dc.role, e.target.value)} />
-                            </div>
-                            <div className="disc-input-group">
-                              <div className="disc-input-label">Resources</div>
-                              <div className="res-counter">
-                                <button className="res-btn" onClick={() => setRes(dc.role, -1)}>−</button>
-                                <span className="res-num">{disc.resources}</span>
-                                <button className="res-btn" onClick={() => setRes(dc.role, +1)}>+</button>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="disc-calc">
-                            = {disc.days}d × {disc.resources} res × {hoursPerDay}h = <strong>{totalHrs}h</strong>
-                            {isDone && <span style={{ color: 'var(--g)', marginLeft: 8, fontWeight: 700 }}>→ will start at 100%</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {/* QC card — fixed 9-day execution schedule + configurable fixing days */}
-                    <div className="disc-card" style={{ minWidth: 240, ...(completedPhases.has('QC') ? { opacity: 0.65, outline: '2px solid var(--g)' } : {}) }}>
-                      <div className="disc-card-top">
-                        <span className="disc-card-name">Quality Control</span>
-                        <span className="disc-card-badge">QC</span>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: completedPhases.has('QC') ? 'var(--g)' : 'var(--muted)', cursor: 'pointer', marginLeft: 'auto', fontWeight: completedPhases.has('QC') ? 700 : 400 }}>
-                          <input type="checkbox" checked={completedPhases.has('QC')} onChange={() => toggleCompleted('QC')} style={{ accentColor: 'var(--g)' }} />
-                          {completedPhases.has('QC') ? '✓ Done' : 'Mark Done'}
-                        </label>
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>Configurable</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                        {[
-                          { field: 'cyc1Days', label: 'QC Execution Cycle 1' },
-                          { field: 'cyc2Days', label: 'QC Execution Cycle 2' },
-                          { field: 'prepDays', label: 'QC Preparation' },
-                          { field: 'df1Days', label: 'Defect Fixing Cycle 1' },
-                          { field: 'df2Days', label: 'Defect Fixing Cycle 2' },
-                          { field: 'regDays', label: 'Regression + Retest' },
-                          { field: 'prDays',  label: 'Prod. Release Prep' },
-                        ].map(f => (
-                          <div key={f.field} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 11, color: 'var(--muted)', flex: 1 }}>{f.label}</span>
-                            <input type="number" min="0.5" step="0.5" className="disc-num days" style={{ width: 50 }}
-                              value={disciplines.QC?.[f.field] || 0.5}
-                              onChange={e => setQcField(f.field, e.target.value)} />
-                            <span style={{ fontSize: 11, color: 'var(--muted)' }}>d</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="disc-inputs" style={{ marginTop: 4 }}>
-                        <div className="disc-input-group">
-                          <div className="disc-input-label">Resources</div>
-                          <div className="res-counter">
-                            <button className="res-btn" onClick={() => setRes('QC', -1)}>−</button>
-                            <span className="res-num">{disciplines.QC?.resources || 1}</span>
-                            <button className="res-btn" onClick={() => setRes('QC', +1)}>+</button>
-                          </div>
-                        </div>
-                      </div>
+                  {/* Completed phases summary strip */}
+                  {completedPhases.size > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, padding: '8px 12px', background: 'rgba(52,211,153,.07)', border: '1px solid rgba(52,211,153,.25)', borderRadius: 8 }}>
+                      <span style={{ fontSize: 11, color: 'var(--g)', fontWeight: 700, marginRight: 4 }}>✓ Already Done (excluded from schedule):</span>
+                      {['BA','UIUX','BE','FE','QC'].filter(r => completedPhases.has(r)).map(r => (
+                        <span key={r} style={{ fontSize: 11, padding: '2px 9px', borderRadius: 6, background: 'rgba(52,211,153,.15)', color: 'var(--g)', fontWeight: 700, border: '1px solid rgba(52,211,153,.3)' }}>{r}</span>
+                      ))}
+                      <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>— go back to Project Basics to change</span>
                     </div>
+                  )}
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.5 }}>
+                    Set planned effort for <strong style={{ color: 'var(--text)' }}>remaining phases only</strong>. QC durations were already configured in Project Basics.
                   </div>
-
-                  {/* Development Team */}
-                  <div className="disc-section-title" style={{ marginTop: 14 }}>DEVELOPMENT TEAM</div>
-                  <div className="disc-grid">
-                    {[
-                      { role: 'BE', label: 'Backend Development',  badge: 'BE' },
-                      { role: 'FE', label: 'Frontend Development',  badge: 'FE' },
-                    ].map(dc => {
-                      const disc = disciplines[dc.role] || { days: 1, resources: 1 };
-                      const totalHrs = disc.days * disc.resources * hoursPerDay;
-                      const isDone = completedPhases.has(dc.role);
-                      return (
-                        <div key={dc.role} className="disc-card" style={isDone ? { opacity: 0.65, outline: '2px solid var(--g)' } : {}}>
-                          <div className="disc-card-top">
-                            <span className="disc-card-name">{dc.label}</span>
-                            <span className="disc-card-badge">{dc.badge}</span>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: isDone ? 'var(--g)' : 'var(--muted)', cursor: 'pointer', marginLeft: 'auto', fontWeight: isDone ? 700 : 400 }}>
-                              <input type="checkbox" checked={isDone} onChange={() => toggleCompleted(dc.role)} style={{ accentColor: 'var(--g)' }} />
-                              {isDone ? '✓ Done' : 'Mark Done'}
-                            </label>
-                          </div>
-                          <div className="disc-inputs">
-                            <div className="disc-input-group" style={{ flex: 2 }}>
-                              <div className="disc-input-label">Duration (days)</div>
-                              <input type="number" min="0.5" step="0.5" className="disc-num days"
-                                value={disc.days} onChange={e => setDays(dc.role, e.target.value)} />
-                            </div>
-                            <div className="disc-input-group">
-                              <div className="disc-input-label">Resources</div>
-                              <div className="res-counter">
-                                <button className="res-btn" onClick={() => setRes(dc.role, -1)}>−</button>
-                                <span className="res-num">{disc.resources}</span>
-                                <button className="res-btn" onClick={() => setRes(dc.role, +1)}>+</button>
+                  {/* Product Team — skip Done roles */}
+                  {(['BA','UIUX'].some(r => !completedPhases.has(r))) && (
+                    <>
+                      <div className="disc-section-title">PRODUCT TEAM</div>
+                      <div className="disc-grid">
+                        {[
+                          { role: 'BA',   label: 'Business Analysis', badge: 'BA'   },
+                          { role: 'UIUX', label: 'UI/UX Design',      badge: 'UI/UX'},
+                        ].filter(dc => !completedPhases.has(dc.role)).map(dc => {
+                          const disc = disciplines[dc.role] || { days: 1, resources: 1 };
+                          const totalHrs = disc.days * disc.resources * hoursPerDay;
+                          return (
+                            <div key={dc.role} className="disc-card">
+                              <div className="disc-card-top">
+                                <span className="disc-card-name">{dc.label}</span>
+                                <span className="disc-card-badge">{dc.badge}</span>
+                              </div>
+                              <div className="disc-inputs">
+                                <div className="disc-input-group" style={{ flex: 2 }}>
+                                  <div className="disc-input-label">Duration (days)</div>
+                                  <input type="number" min="0" step="0.5" className="disc-num days"
+                                    value={disc.days} onChange={e => setDays(dc.role, e.target.value)} />
+                                </div>
+                                <div className="disc-input-group">
+                                  <div className="disc-input-label">Resources</div>
+                                  <div className="res-counter">
+                                    <button type="button" className="res-btn" onClick={() => setRes(dc.role, -1)}>−</button>
+                                    <span className="res-num">{disc.resources}</span>
+                                    <button type="button" className="res-btn" onClick={() => setRes(dc.role, +1)}>+</button>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="disc-calc">
+                                = {disc.days}d × {disc.resources} res × {hoursPerDay}h = <strong>{totalHrs}h</strong>
                               </div>
                             </div>
-                          </div>
-                          <div className="disc-calc">
-                            = {disc.days}d × {disc.resources} res × {hoursPerDay}h = <strong>{totalHrs}h</strong>
-                            {isDone && <span style={{ color: 'var(--g)', marginLeft: 8, fontWeight: 700 }}>→ will start at 100%</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Development Team — skip Done roles */}
+                  {(['BE','FE'].some(r => !completedPhases.has(r))) && (
+                    <>
+                      <div className="disc-section-title" style={{ marginTop: 14 }}>DEVELOPMENT TEAM</div>
+                      <div className="disc-grid">
+                        {[
+                          { role: 'BE', label: 'Backend Development',  badge: 'BE' },
+                          { role: 'FE', label: 'Frontend Development',  badge: 'FE' },
+                        ].filter(dc => !completedPhases.has(dc.role)).map(dc => {
+                          const disc = disciplines[dc.role] || { days: 1, resources: 1 };
+                          const totalHrs = disc.days * disc.resources * hoursPerDay;
+                          return (
+                            <div key={dc.role} className="disc-card">
+                              <div className="disc-card-top">
+                                <span className="disc-card-name">{dc.label}</span>
+                                <span className="disc-card-badge">{dc.badge}</span>
+                              </div>
+                              <div className="disc-inputs">
+                                <div className="disc-input-group" style={{ flex: 2 }}>
+                                  <div className="disc-input-label">Duration (days)</div>
+                                  <input type="number" min="0" step="0.5" className="disc-num days"
+                                    value={disc.days} onChange={e => setDays(dc.role, e.target.value)} />
+                                </div>
+                                <div className="disc-input-group">
+                                  <div className="disc-input-label">Resources</div>
+                                  <div className="res-counter">
+                                    <button type="button" className="res-btn" onClick={() => setRes(dc.role, -1)}>−</button>
+                                    <span className="res-num">{disc.resources}</span>
+                                    <button type="button" className="res-btn" onClick={() => setRes(dc.role, +1)}>+</button>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="disc-calc">
+                                = {disc.days}d × {disc.resources} res × {hoursPerDay}h = <strong>{totalHrs}h</strong>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
                   {/* Dependency & Parallelism Options */}
                   <div className="disc-section-title" style={{ marginTop: 14 }}>DEPENDENCY & PARALLELISM OPTIONS</div>
                   <div className="overlap-box">
                     {/* BA → UI/UX */}
-                    <div className="overlap-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6 }}>
+                    {(() => { const bothDone = completedPhases.has('BA') && completedPhases.has('UIUX'); const eitherZero = disciplines.BA?.days < 0.5 || disciplines.UIUX?.days < 0.5; const disabled = bothDone || eitherZero; return (
+                    <div className="overlap-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6, opacity: disabled ? 0.45 : 1 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>BA → UI/UX Design</div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      {disabled && (
+                        <div style={{ fontSize: 11, color: 'var(--a)', marginBottom: 4 }}>{bothDone ? 'Both phases are Done — no scheduling dependency needed.' : 'Not available when BA or UI/UX has 0 days.'}</div>
+                      )}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer' }}>
                         <input type="radio" name="baUiux" checked={overlapBaUiux === 0}
+                          disabled={disabled}
                           onChange={() => setOverlapBaUiux(0)} />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Sequential — UI/UX starts after BA is done (FS)</span>
                       </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer' }}>
                         <input type="radio" name="baUiux" checked={overlapBaUiux > 0}
+                          disabled={disabled}
                           onChange={() => setOverlapBaUiux(40)} />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Parallel — UI/UX starts when BA is</span>
                         <input type="number" min="10" max="90" step="5"
@@ -6248,23 +6564,30 @@
                         />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>% done</span>
                       </label>
-                      {overlapBaUiux > 0 && (
+                      {overlapBaUiux > 0 && !disabled && (
                         <div className="overlap-save">Saves ~{Math.floor((disciplines.UIUX?.days || 0) * overlapBaUiux / 100)} working days</div>
                       )}
                     </div>
+                    ); })()}
 
                     <div style={{ borderTop: '1px solid var(--border)', margin: '10px 0' }} />
 
                     {/* BE → FE */}
-                    <div className="overlap-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6 }}>
+                    {(() => { const bothDone = completedPhases.has('BE') && completedPhases.has('FE'); const eitherZero = disciplines.BE?.days < 0.5 || disciplines.FE?.days < 0.5; const disabled = bothDone || eitherZero; return (
+                    <div className="overlap-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6, opacity: disabled ? 0.45 : 1 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>Backend (BE) → Frontend (FE)</div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      {disabled && (
+                        <div style={{ fontSize: 11, color: 'var(--a)', marginBottom: 4 }}>{bothDone ? 'Both phases are Done — no scheduling dependency needed.' : 'Not available when BE or FE has 0 days.'}</div>
+                      )}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer' }}>
                         <input type="radio" name="beFe" checked={overlapBeFe === 0}
+                          disabled={disabled}
                           onChange={() => setOverlapBeFe(0)} />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Sequential — FE starts after BE is done (FS)</span>
                       </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer' }}>
                         <input type="radio" name="beFe" checked={overlapBeFe > 0}
+                          disabled={disabled}
                           onChange={() => setOverlapBeFe(40)} />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Parallel — FE starts when BE is</span>
                         <input type="number" min="10" max="90" step="5"
@@ -6275,10 +6598,11 @@
                         />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>% done</span>
                       </label>
-                      {overlapBeFe > 0 && (
+                      {overlapBeFe > 0 && !disabled && (
                         <div className="overlap-save">Saves ~{Math.floor((disciplines.FE?.days || 0) * overlapBeFe / 100)} working days</div>
                       )}
                     </div>
+                    ); })()}
 
                     <div style={{ borderTop: '1px solid var(--border)', margin: '10px 0' }} />
 
@@ -6323,47 +6647,61 @@
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                     {/* CUBES Plan — editable */}
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--brand)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>CUBES Plan <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--muted)', textTransform: 'none' }}>(click cells to edit)</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '.05em' }}>CUBES Plan</span>
+                        <span style={{ fontSize: 9, color: 'var(--muted)' }}>Edit Days or Start/End dates directly — chain updates automatically</span>
+                        {Object.keys(dateOverrides).length > 0 && (
+                          <button type="button" onClick={clearDateOverrides} style={{ fontSize: 10, padding: '1px 8px', borderRadius: 4, border: '1px solid var(--a)', background: 'rgba(251,191,36,.1)', color: 'var(--a)', cursor: 'pointer', marginLeft: 'auto' }}>
+                            ↺ Reset date overrides ({Object.keys(dateOverrides).length})
+                          </button>
+                        )}
+                      </div>
                       <div className="plan-preview" style={{ fontSize: 11 }}>
                         <table>
-                          <thead><tr><th>Task</th><th style={{ width: 48 }}>Days</th><th style={{ width: 52 }}>Res.</th><th>Predecessor</th></tr></thead>
+                          <thead><tr><th>Task</th><th style={{ minWidth: 100 }}>Start</th><th style={{ minWidth: 100 }}>End</th><th style={{ width: 56 }}>Days</th><th style={{ width: 44 }}>Res.</th><th>Predecessor</th><th style={{ width: 32 }} /></tr></thead>
                           <tbody>
-                            {generatedTasks.map((t, i) => {
+                            {reviewTasks.map((t, i) => {
                               const isPhase = t.is_summary;
                               const isMs = t.is_milestone;
                               const isCross = t.predecessor && t.predecessor.includes('cross-phase');
-                              const leafTasks = generatedTasks.filter(x => !x.is_summary && !x.is_milestone);
+                              const hasOverride = !!(dateOverrides[t.title]?.start || dateOverrides[t.title]?.end);
+                              const inpStyle = { fontSize: 10, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', width: '100%', cursor: 'text' };
                               return (
-                                <tr key={i} className={isPhase ? 'plan-row-phase' : isMs ? 'plan-row-ms' : ''}>
+                                <tr key={i} className={isPhase ? 'plan-row-phase' : isMs ? 'plan-row-ms' : ''} style={hasOverride ? { background: 'rgba(251,191,36,.06)' } : {}}>
                                   <td style={{ paddingLeft: isPhase ? 8 : 18, fontSize: 11 }}>
                                     {isMs ? '◆ ' : ''}{t.title}
                                     {t.role && <span className="plan-badge" style={{ marginLeft: 5 }}>{t.role}</span>}
+                                    {hasOverride && <span style={{ marginLeft: 4, fontSize: 8, color: 'var(--a)', fontWeight: 700 }}>✎</span>}
+                                  </td>
+                                  <td style={{ padding: '3px 5px' }}>
+                                    {!isPhase ? (
+                                      <input type="date" value={t.start || ''} onChange={e => onReviewStartChange(t, e.target.value)} style={inpStyle} />
+                                    ) : <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.start || '—'}</span>}
+                                  </td>
+                                  <td style={{ padding: '3px 5px' }}>
+                                    {!isPhase ? (
+                                      <input type="date" value={t.end || ''} onChange={e => onReviewEndChange(t, e.target.value)} style={inpStyle} />
+                                    ) : <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.end || '—'}</span>}
                                   </td>
                                   <td>
                                     {!isPhase && !isMs ? (
-                                      <input type="number" min="0.5" step="0.5" max="365"
-                                        value={t.duration_days || ''}
-                                        onChange={e => {
-                                          const newDays = Math.max(0.5, parseFloat(e.target.value) || 0.5);
-                                          if (t.role === 'BA') setDays('BA', newDays);
-                                          else if (t.role === 'UIUX') setDays('UIUX', newDays);
-                                          else if (t.role === 'BE' && t.title.includes('Backend')) setDays('BE', newDays);
-                                          else if (t.role === 'FE') setDays('FE', newDays);
-                                          else if (t.title === 'QC Preparation') setQcField('prepDays', newDays);
-                                          else if (t.title.includes('QC Execution Cycle 1')) setQcField('cyc1Days', newDays);
-                                          else if (t.title.includes('QC Execution Cycle 2')) setQcField('cyc2Days', newDays);
-                                          else if (t.title.includes('Defect Fixing (Cycle 1)')) setQcField('df1Days', newDays);
-                                          else if (t.title.includes('Defect Fixing (Cycle 2)')) setQcField('df2Days', newDays);
-                                          else if (t.title.includes('Regression')) setQcField('regDays', newDays);
-                                          else if (t.title.includes('Production Release')) setQcField('prDays', newDays);
-                                        }}
-                                        style={{ width: 42, padding: '2px 4px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', textAlign: 'center' }}
+                                      <input type="number" min="0" step="0.5" max="365"
+                                        value={t.duration_days ?? ''}
+                                        onChange={e => applyDurationChange(t, Math.max(0, parseFloat(e.target.value) || 0))}
+                                        style={{ width: 52, minWidth: 52, padding: '3px 6px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', textAlign: 'center' }}
                                       />
                                     ) : '—'}
                                   </td>
                                   <td style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 11 }}>{(!isMs && !isPhase && t.resources) ? t.resources : '—'}</td>
                                   <td style={{ fontSize: 10, color: isCross ? '#f97316' : 'var(--muted)', fontStyle: isCross ? 'italic' : 'normal' }}>
                                     {(!isPhase && t.predecessor) ? t.predecessor : '—'}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {!isPhase && !isMs ? (
+                                      <button type="button" title="Remove from plan (0 days)"
+                                        onClick={() => removeWizardTask(t)}
+                                        style={{ padding: '1px 5px', fontSize: 10, borderRadius: 3, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
+                                    ) : null}
                                   </td>
                                 </tr>
                               );
@@ -6457,7 +6795,7 @@
                       <div style={{ fontSize: 11, fontWeight: 700, color: '#f97316', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>Impl. Plan <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--muted)', textTransform: 'none' }}>(auto: CUBES +20%)</span></div>
                       <div className="plan-preview" style={{ fontSize: 11 }}>
                         <table>
-                          <thead><tr><th>Task</th><th style={{ width: 48 }}>Days</th><th style={{ width: 52 }}>Res.</th><th>Predecessor</th></tr></thead>
+                          <thead><tr><th>Task</th><th style={{ minWidth: 78 }}>Start</th><th style={{ minWidth: 78 }}>End</th><th style={{ width: 44 }}>Days</th><th style={{ width: 44 }}>Res.</th><th>Predecessor</th></tr></thead>
                           <tbody>
                             {generatedTasksImpl.map((t, i) => {
                               const isPhase = t.is_summary;
@@ -6469,6 +6807,8 @@
                                     {isMs ? '◆ ' : ''}{t.title}
                                     {t.role && <span className="plan-badge" style={{ marginLeft: 5 }}>{t.role}</span>}
                                   </td>
+                                  <td style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{t.start || '—'}</td>
+                                  <td style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{t.end || '—'}</td>
                                   <td style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 11 }}>{!isPhase && !isMs ? (t.duration_days || '—') : '—'}</td>
                                   <td style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 11 }}>{(!isMs && !isPhase && t.resources) ? t.resources : '—'}</td>
                                   <td style={{ fontSize: 10, color: isCross ? '#f97316' : 'var(--muted)', fontStyle: isCross ? 'italic' : 'normal' }}>
@@ -6491,7 +6831,7 @@
                     const minDate  = new Date(Math.min(...allDates.map(d => d.getTime())));
                     const maxDate  = new Date(Math.max(...allDates.map(d => d.getTime())));
                     const totalMs  = maxDate - minDate || 1;
-                    const ROLE_GANTT_COLOR = { BA: '#6366f1', UIUX: '#8b5cf6', BE: '#0ea5e9', FE: '#22c55e', QC: '#f97316', PM: '#ef4444' };
+                    const ROLE_GANTT_COLOR = { BA: '#6366f1', UIUX: '#8b5cf6', BE: '#0ea5e9', FE: '#22c55e', QC: '#f97316', ALL: '#94a3b8', PM: '#ef4444' };
                     const pct = (d) => ((new Date(d) - minDate) / totalMs) * 100;
                     const wPct = (s, e) => Math.max(0.5, ((new Date(e) - new Date(s)) / totalMs) * 100);
 
@@ -6545,6 +6885,68 @@
                   })()}
                 </div>
               )}
+
+              {step === 4 && (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>Final review</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.55 }}>
+                    Confirm start and end dates for every task before creating both projects. To change durations or remove tasks, use <strong>← Back</strong> to Review Plan (or earlier steps).
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+                    {[
+                      { label: 'Project (CUBES)', value: name || '—', color: 'var(--brand)' },
+                      { label: 'Impl. Clone', value: (name ? name + ' [IMP]' : '—'), color: '#f97316' },
+                      { label: 'Start', value: startDate },
+                      { label: 'CUBES End', value: projEnd || '—' },
+                      { label: 'CUBES Duration', value: `${totalDays} working days` },
+                      { label: `Impl. End (+${implMargin}%)`, value: implEnd || '—', color: '#f97316' },
+                      { label: 'Priority', value: priority },
+                    ].map(kv => (
+                      <div key={kv.label} style={{ background: 'var(--s2)', border: `1px solid ${kv.color ? kv.color+'33' : 'var(--border)'}`, borderRadius: 8, padding: '7px 12px', minWidth: 80 }}>
+                        <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, marginBottom: 2, textTransform: 'uppercase' }}>{kv.label}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: kv.color || 'var(--text)' }}>{kv.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ maxHeight: '52vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--s2)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--s3)', zIndex: 1 }}>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>Task</th>
+                          <th style={{ padding: '8px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Start</th>
+                          <th style={{ padding: '8px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>End</th>
+                          <th style={{ padding: '8px 8px', borderBottom: '1px solid var(--border)' }}>Days</th>
+                          <th style={{ padding: '8px 8px', borderBottom: '1px solid var(--border)' }}>Role</th>
+                          <th style={{ textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>Predecessor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviewTasks.map((t, i) => {
+                          const isPhase = t.is_summary;
+                          const isMs = t.is_milestone;
+                          const hasOv = !!(dateOverrides[t.title]);
+                          return (
+                            <tr key={i} style={{ background: isPhase ? 'rgba(99,102,241,.06)' : hasOv ? 'rgba(251,191,36,.07)' : 'transparent' }}>
+                              <td style={{ padding: '6px 10px', paddingLeft: isPhase ? 10 : 18, fontWeight: isPhase ? 700 : 400 }}>
+                                {isMs ? '◆ ' : ''}{t.title}
+                                {hasOv && <span style={{ marginLeft: 4, fontSize: 8, color: 'var(--a)', fontWeight: 700 }}>✎ edited</span>}
+                              </td>
+                              <td style={{ padding: '6px 8px', color: hasOv ? 'var(--a)' : 'var(--muted)', whiteSpace: 'nowrap', fontWeight: hasOv ? 700 : 400 }}>{t.start || '—'}</td>
+                              <td style={{ padding: '6px 8px', color: hasOv ? 'var(--a)' : 'var(--muted)', whiteSpace: 'nowrap', fontWeight: hasOv ? 700 : 400 }}>{t.end || '—'}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{!isPhase && !isMs ? (t.duration_days ?? '—') : '—'}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center' }}>{t.role || '—'}</td>
+                              <td style={{ padding: '6px 10px', fontSize: 10, color: 'var(--muted)' }}>{t.predecessor || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 12, fontSize: 11, color: 'var(--muted)' }}>
+                    Implementation plan applies a <strong>{implMargin}%</strong> buffer to durations (separate project). Estimated Impl. end: <strong style={{ color: '#f97316' }}>{implEnd || '—'}</strong>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* footer */}
@@ -6557,9 +6959,9 @@
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 {saving && saveMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{saveMsg}</span>}
                 <button className="wiz-btn wiz-btn-secondary" onClick={onClose}>Cancel</button>
-                {step < 3
+                {step < 4
                   ? <button className="wiz-btn wiz-btn-primary"
-                      disabled={step === 1 && !name.trim()}
+                      disabled={!name.trim()}
                       onClick={() => setStep(s => s + 1)}>
                       Next →
                     </button>

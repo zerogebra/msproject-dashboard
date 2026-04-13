@@ -5,7 +5,7 @@ from typing import Optional, List
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -163,7 +163,7 @@ def portfolio(username: str = "user"):
             if requesting_user and not can_access_project(requesting_user, name):
                 continue
 
-            tasks = conn.execute("SELECT * FROM tasks WHERE project_code=?", (code,)).fetchall()
+            tasks = conn.execute("SELECT * FROM tasks WHERE project_code=? ORDER BY rowid", (code,)).fetchall()
 
             # Load any in-app overrides so the UI reflects edits made in the dashboard
             proj_overrides = get_project_overrides(name)
@@ -662,7 +662,7 @@ class WizardTask(BaseModel):
     pct: float = 0.0
     role: Optional[str] = None
     resources: int = 1
-    duration_days: int = 0
+    duration_days: float = 0.0
     predecessor: Optional[str] = None
 
 class WizardProjectCreate(BaseModel):
@@ -708,7 +708,7 @@ def _insert_wizard_project(conn, req: WizardProjectCreate, code: str, now_iso: s
             (tid, code, t.title,
              t.start_date or proj_start, t.end_date or proj_end,
              t.pct, t.outline_level, 1 if t.is_summary else 0,
-             1 if t.is_milestone else 0, 0, t.duration_days or 0)
+             1 if t.is_milestone else 0, 0, float(t.duration_days or 0))
         )
     # Second pass: resolve predecessor text to actual task IDs
     for tid, t in task_rows:
@@ -1456,12 +1456,16 @@ async def save_c2026(request: Request, caller_id: str):
 
 # ── Project Comments (Stakeholder Comments & Risks) ──────────────────────────
 
+_NO_CACHE = {"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"}
+
+
 @app.get("/api/project-comments")
 def get_project_comments(caller_id: str = ""):
     from app.database import get_conn
     with get_conn() as conn:
         rows = conn.execute("SELECT project_code, comment, updated_by, updated_at FROM project_comments").fetchall()
-    return {r["project_code"]: {"comment": r["comment"], "updated_by": r["updated_by"], "updated_at": r["updated_at"]} for r in rows}
+    data = {r["project_code"]: {"comment": r["comment"], "updated_by": r["updated_by"], "updated_at": r["updated_at"]} for r in rows}
+    return JSONResponse(content=data, headers=_NO_CACHE)
 
 
 @app.put("/api/project-comments/{project_code}")
@@ -1479,7 +1483,7 @@ async def save_project_comment(project_code: str, request: Request, caller_id: s
             "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) VALUES (?,?,?,?)",
             (project_code, comment, username, now)
         )
-    return {"status": "ok"}
+    return JSONResponse(content={"status": "ok"}, headers=_NO_CACHE)
 
 
 # ── Project Progress ──────────────────────────────────────────────────────────
