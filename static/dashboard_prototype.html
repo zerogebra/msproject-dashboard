@@ -10251,11 +10251,13 @@
                   {plan.projects.map((proj, pi) => {
                     const projPct = calcProjectPct(proj);
                     const { computedStart, computedEnd } = calcProjectWindow(proj);
-                    // Program Summary default End is TBD unless admin sets/Syncs it.
                     const projStart = proj.summary_start || computedStart;
-                    const projEnd = (proj.summary_end !== undefined && proj.summary_end !== null) ? proj.summary_end : null;
+                    // confirmedEnd = admin explicitly committed; effectiveEnd = confirmed OR inferred from phase rows
+                    const confirmedEnd = (proj.summary_end != null && proj.summary_end !== '') ? proj.summary_end : null;
+                    const effectiveEnd = confirmedEnd || computedEnd;
                     const shownPct = (proj.summary_pct != null) ? proj.summary_pct : projPct;
-                    const bp = barPos(projStart, projEnd, cols);
+                    const bp = barPos(projStart, effectiveEnd, cols);
+                    const endIsEstimated = !confirmedEnd && !!computedEnd;
                     const isExpanded = !!ganttExpanded[proj.id];
                     return (
                       <React.Fragment key={proj.id}>
@@ -10269,25 +10271,29 @@
                               <div style={{ fontSize:10, fontWeight:600, color:phaseColor(shownPct) }}>{shownPct!=null?shownPct+'%':'TBD — click to fill'}</div>
                             </div>
                             <div style={{ flexShrink:0 }}>
-                              <span style={{ fontSize:9, color:'#6366f1', fontWeight:700, whiteSpace:'nowrap', background:'rgba(99,102,241,.08)', border:'1px solid rgba(99,102,241,.2)', borderRadius:4, padding:'1px 5px' }}>
-                                {projEnd ? fmt(projEnd) : 'TBD'}
+                              <span style={{ fontSize:9, color: confirmedEnd ? '#6366f1' : (computedEnd ? '#94a3b8' : '#94a3b8'), fontWeight:700, whiteSpace:'nowrap', background: confirmedEnd ? 'rgba(99,102,241,.08)' : 'rgba(148,163,184,.08)', border:`1px solid ${confirmedEnd ? 'rgba(99,102,241,.2)' : 'rgba(148,163,184,.25)'}`, borderRadius:4, padding:'1px 5px' }}>
+                                {confirmedEnd ? fmt(confirmedEnd) : (computedEnd ? '~' + fmt(computedEnd) : 'TBD')}
                               </span>
                             </div>
                           </div>
                           <div style={{ flex:1, position:'relative', height:44 }}>
                             {cols.map((c,ci) => <div key={ci} style={{ position:'absolute', left:(ci/cols.length*100)+'%', top:0, bottom:0, width:1, background:'var(--border)', opacity:0.4 }} />)}
                             {tPct!==null && <div style={{ position:'absolute', left:tPct+'%', top:0, bottom:0, width:2, borderLeft:'2px dashed #ef4444', zIndex:5 }} />}
-                            {bp ? (
+                            {bp && (
                               <>
-                                <div style={{ position:'absolute', left:bp.left+'%', width:bp.width+'%', top:'20%', height:'60%', background:phaseColor(shownPct), opacity:0.15, borderRadius:3 }} />
+                                {/* Light blue background: only when admin confirmed an end date */}
+                                {!endIsEstimated && (
+                                  <div style={{ position:'absolute', left:bp.left+'%', width:bp.width+'%', top:'20%', height:'60%', background:phaseColor(shownPct), opacity:0.15, borderRadius:3 }} />
+                                )}
+                                {/* Dark progress fill */}
                                 <div style={{ position:'absolute', left:bp.left+'%', width:(bp.width*(shownPct||0)/100)+'%', top:'20%', height:'60%', background:phaseColor(shownPct), opacity:0.9, borderRadius:3, display:'flex', alignItems:'center', justifyContent:'flex-end', overflow:'hidden', minWidth:shownPct>0?2:0 }}>
                                   {shownPct>15 && <span style={{ fontSize:9, color:'#fff', fontWeight:700, paddingRight:4 }}>{shownPct}%</span>}
                                 </div>
+                                {/* Dashed open-ended tail when using estimated (not confirmed) end */}
+                                {endIsEstimated && (
+                                  <div style={{ position:'absolute', left:(bp.left + bp.width*(shownPct||0)/100)+'%', right:'2%', top:'43%', borderTop:'1.5px dashed rgba(148,163,184,.45)', pointerEvents:'none' }} />
+                                )}
                               </>
-                            ) : (
-                              <div style={{ position:'absolute', left:'5%', right:'5%', top:'22%', height:'56%', border:'1px dashed #94a3b8', borderRadius:3, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                <span style={{ fontSize:9, color:'#94a3b8' }}>TBD — fill data below ↓</span>
-                              </div>
                             )}
                           </div>
                         </div>
