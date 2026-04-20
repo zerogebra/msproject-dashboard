@@ -2691,6 +2691,7 @@
           pending_overrides: p.pending_overrides || 0,
           stakeholder: p.stakeholder || '',
           requested_by: p.requested_by || null,
+          exec_additional_days: p.exec_additional_days ?? null,
           color, progress, health: rag(progress, pEnd, ss[0]), start: ss[0], end: pEnd, items
         };
       });
@@ -2792,6 +2793,10 @@
 
       updateProjectRequestedBy: (code, requested_by, callerId) =>
         fetch(`/api/projects/${code}/requested_by?caller_id=${encodeURIComponent(callerId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requested_by }) })
+          .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Failed') })),
+
+      updateProjectExecSummary: (code, data, callerId) =>
+        fetch(`/api/projects/${code}/exec-summary?caller_id=${encodeURIComponent(callerId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
           .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Failed') })),
 
       updateTask: (taskId, data, callerId) =>
@@ -4173,6 +4178,23 @@
         setSavingRB(false);
       }
 
+      // Exec Summary extra days — display-only columns, CUBES table only
+      const [extraDaysMap, setExtraDaysMap] = useState({});   // local overrides after save
+      const [editingED, setEditingED] = useState(null);
+      const [edDraft, setEdDraft] = useState('');
+      const [savingED, setSavingED] = useState(false);
+
+      async function saveExtraDays(code) {
+        const val = edDraft === '' ? null : parseInt(edDraft);
+        setSavingED(true);
+        try {
+          await api.updateProjectExecSummary(code, { exec_additional_days: val }, user?.id || '');
+          setExtraDaysMap(m => ({ ...m, [code]: val }));
+          setEditingED(null);
+        } catch (e) { alert('Failed to save: ' + e.message); }
+        setSavingED(false);
+      }
+
       // Comments stored in DB — visible to all users
       const [comments, setComments] = useState({});
       const [savingComment, setSavingComment] = useState(false);
@@ -4267,17 +4289,24 @@
 
       const hiddenCount = hiddenProjects.size;
 
-      function ProjTable({ rows }) {
+      function ProjTable({ rows, showExtraCols }) {
         if (!rows.length) return <div style={{ fontSize: 12, color: 'var(--dim)', padding: '16px 12px', textAlign: 'center' }}>No projects in this group.</div>;
+        const thStyle = { padding: '7px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', borderBottom: '2px solid var(--border2)', whiteSpace: 'nowrap' };
+        const thExtraStyle = { ...thStyle, color: '#f59e0b', borderBottom: '2px solid rgba(245,158,11,.4)', background: 'rgba(245,158,11,.04)' };
         return (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: 'var(--s2)' }}>
-                  {['Project Name','Requested By','Start','End','Status','Plan %','Actual %','Delay (d)','Health','Stakeholder Comments & Risks'].map(h => (
-                    <th key={h} style={{ padding: '7px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', borderBottom: '2px solid var(--border2)', whiteSpace: 'nowrap' }}>{h}</th>
+                  {['Project Name','Requested By','Start','End','Status','Plan %','Actual %','Delay (d)','Health','Comments & Justifications'].map(h => (
+                    <th key={h} style={thStyle}>{h}</th>
                   ))}
-                  {canComment && <th style={{ padding: '7px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', borderBottom: '2px solid var(--border2)' }}>Visibility</th>}
+                  {showExtraCols && <>
+                    <th style={thExtraStyle} title="Display-only: extra buffer days for executive reporting">Add. Buffer</th>
+                    <th style={thExtraStyle} title="Display-only: revised end date (original end + buffer days)">New End</th>
+                    <th style={thExtraStyle} title="Display-only: delay only shown if new end date has already passed today">New Delay</th>
+                  </>}
+                  {canComment && <th style={thStyle}>Visibility</th>}
                 </tr>
               </thead>
               <tbody>
@@ -4402,6 +4431,58 @@
                           </div>
                         )}
                       </td>
+                      {showExtraCols && (() => {
+                        const addDays = (p.code in extraDaysMap) ? extraDaysMap[p.code] : p.exec_additional_days;
+                        const addDaysNum = addDays != null ? parseInt(addDays) : null;
+                        // New end = original project end + addDays working days
+                        const newEnd = (addDaysNum > 0 && p.end) ? addWorkDays(new Date(p.end), addDaysNum).toISOString().split('T')[0] : null;
+                        // New delay = only show if new end has already passed today (real overdue)
+                        const todayStr = TODAY.toISOString().split('T')[0];
+                        const newDelayDays = (newEnd && newEnd < todayStr) ? Math.abs(days(newEnd, todayStr)) : null;
+                        const tdExtra = { padding: '6px 10px', background: 'rgba(245,158,11,.03)', borderLeft: '1px solid rgba(245,158,11,.15)' };
+                        return (<>
+                          {/* Add. Days */}
+                          <td style={tdExtra}>
+                            {editingED === p.code ? (
+                              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                                <input autoFocus type="number" min="0" max="999"
+                                  style={{ width: 52, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid #f59e0b', background: 'var(--s2)', color: 'var(--fg)', textAlign: 'center' }}
+                                  value={edDraft}
+                                  placeholder="0"
+                                  onChange={e => setEdDraft(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveExtraDays(p.code); if (e.key === 'Escape') setEditingED(null); }} />
+                                <button onClick={() => saveExtraDays(p.code)} disabled={savingED}
+                                  style={{ padding: '3px 6px', borderRadius: 4, border: 'none', background: '#f59e0b', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>{savingED ? '…' : '✓'}</button>
+                                <button onClick={() => setEditingED(null)}
+                                  style={{ padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <span style={{ fontWeight: addDaysNum > 0 ? 700 : 400, color: addDaysNum > 0 ? '#b45309' : 'var(--dim)', fontStyle: addDaysNum > 0 ? 'normal' : 'italic' }}>
+                                  {addDaysNum > 0 ? `+${addDaysNum}d` : '—'}
+                                </span>
+                                {isAdmin && (
+                                  <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11 }}
+                                    onClick={() => { setEdDraft(addDaysNum != null ? String(addDaysNum) : ''); setEditingED(p.code); }}
+                                    title="Set additional days (exec summary only)">✎</span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          {/* New End */}
+                          <td style={{ ...tdExtra, whiteSpace: 'nowrap' }}>
+                            <span style={{ fontWeight: newEnd ? 700 : 400, color: newEnd ? '#b45309' : 'var(--dim)', fontStyle: newEnd ? 'normal' : 'italic' }}>
+                              {newEnd ? fmt(newEnd) : '—'}
+                            </span>
+                          </td>
+                          {/* New Delay — only shown when new end is already past today */}
+                          <td style={{ ...tdExtra, textAlign: 'right' }}>
+                            {newDelayDays > 0
+                              ? <span style={{ fontWeight: 800, color: 'var(--r)', fontSize: 12 }}>+{newDelayDays}d</span>
+                              : <span style={{ color: 'var(--dim)', fontSize: 11 }}>—</span>}
+                          </td>
+                        </>);
+                      })()}
                       {canComment && (
                         <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                           <button onClick={() => toggleHide(p.code)}
@@ -4440,7 +4521,7 @@
                   <div style={{ padding: '6px 14px 4px', fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                     🔷 CUBES Projects ({cubesProjs.filter(p => !hiddenProjects.has(p.code)).length})
                   </div>
-                  <ProjTable rows={cubesProjs} />
+                  <ProjTable rows={cubesProjs} showExtraCols={true} />
                 </div>
               )}
               {implProjs.length > 0 && (
@@ -4865,7 +4946,7 @@
               {planEditMode && isAdmin && !isRoot && !t.is_summary && !isMs ? (
                 <input type="number" min="1" max="999"
                   style={{ width: 48, fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--brand)', background: 'var(--s2)', color: 'var(--text)', textAlign: 'right' }}
-                  defaultValue={pendingEdit?.duration_days ?? (dur > 0 ? dur : (t.duration_days || dur))}
+                  defaultValue={pendingEdit?.duration_days ?? (t.duration_days > 0 ? t.duration_days : (dur || 1))}
                   onBlur={e => onDurationEdit && onDurationEdit(t.id, e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.target.blur(); } }}
                 />

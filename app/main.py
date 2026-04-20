@@ -211,7 +211,8 @@ def portfolio(username: str = "user"):
                 "pending_overrides": pending_count(name),
                 "stakeholder":      p["stakeholder"] if "stakeholder" in p.keys() else None,
                 "sync_locked":      bool(p["sync_locked"]) if "sync_locked" in p.keys() else False,
-                "requested_by":     p["requested_by"] if "requested_by" in p.keys() else None,
+                "requested_by":          p["requested_by"] if "requested_by" in p.keys() else None,
+                "exec_additional_days":  p["exec_additional_days"] if "exec_additional_days" in p.keys() else None,
                 "items":            items,
             })
 
@@ -626,6 +627,24 @@ def update_project_requested_by(code: str, req: ProjectRequestedByUpdate, caller
         if not p:
             raise HTTPException(404, "Project not found.")
         conn.execute("UPDATE projects SET requested_by=? WHERE code=?", (req.requested_by.strip() or None, code))
+    return {"status": "ok"}
+
+
+class ProjectExecSummaryUpdate(BaseModel):
+    exec_additional_days: Optional[int] = None
+
+@app.put("/api/projects/{code}/exec-summary")
+def update_project_exec_summary(code: str, req: ProjectExecSummaryUpdate, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        p = conn.execute("SELECT code FROM projects WHERE code=?", (code,)).fetchone()
+        if not p:
+            raise HTTPException(404, "Project not found.")
+        conn.execute(
+            "UPDATE projects SET exec_additional_days=? WHERE code=?",
+            (req.exec_additional_days, code)
+        )
     return {"status": "ok"}
 
 

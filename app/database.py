@@ -466,6 +466,12 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass
 
+        # schema v1.9 — exec summary display-only extra days
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN exec_additional_days INTEGER")
+        except sqlite3.OperationalError:
+            pass
+
         # Seed default dashboard settings if missing
         row = conn.execute("SELECT id FROM dashboard_settings WHERE id='global'").fetchone()
         if not row:
