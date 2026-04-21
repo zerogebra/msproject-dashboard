@@ -9861,17 +9861,28 @@
       }
 
       // ─── Dependency helpers ───────────────────────────────────
-      function rowCode(pi, phi, team) {
-        // e.g. P1.Ph1.BA  or  P2.Ph1.UIUX
+      function rowCode(pi, phi, team, si) {
+        // si=null → flat: P1.Ph1.BA  |  si=number → staged: P1.Ph3.St1.BA
         const t = team.replace(/\//g,'').replace(/\s+/g,'');
+        if (si != null) return `P${pi+1}.Ph${phi+1}.St${si+1}.${t}`;
         return `P${pi+1}.Ph${phi+1}.${t}`;
+      }
+      function allPhaseRows(ph) {
+        // Returns flat array of {row, si} from either staged or flat phase
+        const out = [];
+        if (ph.stages && ph.stages.length) {
+          ph.stages.forEach((st, si) => (st.team_rows||[]).forEach(row => out.push({row, si})));
+        } else {
+          (ph.team_rows||[]).forEach(row => out.push({row, si: null}));
+        }
+        return out;
       }
       function buildCodeMap(planData) {
         const map = {};
         (planData.projects || []).forEach((proj, pi) => {
           (proj.phases || []).forEach((ph, phi) => {
-            (ph.team_rows || []).forEach(row => {
-              map[rowCode(pi, phi, row.team)] = row;
+            allPhaseRows(ph).forEach(({row, si}) => {
+              map[rowCode(pi, phi, row.team, si)] = row;
             });
           });
         });
@@ -9928,34 +9939,41 @@
           else if (hasD && hasE && !hasS) { row.start = addWorkDays(row.end, -(row.days - 1)); }
         }
       }
+      function _cascadeRows(n, cm, changedCode) {
+        // Propagate start/end changes through all dependent rows (flat + staged)
+        let dirty = new Set([changedCode]);
+        for (let pass = 0; pass < 10 && dirty.size; pass++) {
+          const nextDirty = new Set();
+          n.projects.forEach((proj, pj) => {
+            proj.phases.forEach((ph, phj) => {
+              allPhaseRows(ph).forEach(({row: depRow, si: sij}) => {
+                if (depRow.depends_on && depRow.depends_on.some(d => dirty.has(d.ref))) {
+                  const prevEnd = depRow.end;
+                  autoCalc(depRow, cm, null);
+                  if (depRow.end !== prevEnd) nextDirty.add(rowCode(pj, phj, depRow.team, sij));
+                }
+              });
+            });
+          });
+          dirty = nextDirty;
+        }
+      }
       function updateTeamRow(pi, phi, ri, field, val) {
         updatePhase(pi, phi, n => {
           const r = n.projects[pi].phases[phi].team_rows[ri];
           r[field] = val;
           const cm = buildCodeMap(n);
           autoCalc(r, cm, field);
-          // Cascade: propagate start/end changes to every row that depends on the edited row.
-          // cm holds live object references so updates are visible immediately to later passes.
-          // Up to 10 passes covers deep chains (A→B→C→D…) without risk of infinite loops.
-          const changedCode = rowCode(pi, phi, r.team);
-          let dirty = new Set([changedCode]);
-          for (let pass = 0; pass < 10 && dirty.size; pass++) {
-            const nextDirty = new Set();
-            n.projects.forEach((proj, pj) => {
-              proj.phases.forEach((ph, phj) => {
-                ph.team_rows.forEach((depRow, rj) => {
-                  if (depRow.depends_on && depRow.depends_on.some(d => dirty.has(d.ref))) {
-                    const prevEnd = depRow.end;
-                    autoCalc(depRow, cm, null); // null = fill missing: resolves new depStart then recalcs end
-                    if (depRow.end !== prevEnd) {
-                      nextDirty.add(rowCode(pj, phj, depRow.team));
-                    }
-                  }
-                });
-              });
-            });
-            dirty = nextDirty;
-          }
+          _cascadeRows(n, cm, rowCode(pi, phi, r.team));
+        });
+      }
+      function updateStagedRow(pi, phi, si, ri, field, val) {
+        updatePhase(pi, phi, n => {
+          const r = n.projects[pi].phases[phi].stages[si].team_rows[ri];
+          r[field] = val;
+          const cm = buildCodeMap(n);
+          autoCalc(r, cm, field);
+          _cascadeRows(n, cm, rowCode(pi, phi, r.team, si));
         });
       }
       function updateRelease(pi, phi, ri, field, val) {
@@ -9963,10 +9981,8 @@
       }
 
       function calcPhasePct(phase) {
-        // PMO rule: undetermined/new phases count as 0%, not skipped
-        const rows = phase.team_rows || [];
-        if (!rows.length) return 0; // empty phase = 0% (brand new, unplanned)
-        // Use days as weight if available, else 1 per row so all rows count
+        const rows = allPhaseRows(phase).map(x => x.row);
+        if (!rows.length) return 0;
         const tot = rows.reduce((s, r) => s + (r.days || 1), 0);
         return Math.round(rows.reduce((s, r) => s + (r.pct || 0) * (r.days || 1), 0) / tot);
       }
@@ -9974,10 +9990,10 @@
       function calcProjectPct(proj) {
         const phases = proj.phases || [];
         if (!phases.length) return null;
-        // All phases included — undetermined phases pull % down (PMO standard)
         const data = phases.map(ph => {
           const pct = calcPhasePct(ph);
-          const days = Math.max(1, (ph.team_rows || []).reduce((s, r) => s + (r.days || 1), 0));
+          const rows = allPhaseRows(ph).map(x => x.row);
+          const days = Math.max(1, rows.reduce((s, r) => s + (r.days || 1), 0));
           return { pct, days };
         });
         const tot = data.reduce((s, x) => s + x.days, 0);
@@ -9986,7 +10002,7 @@
       function calcProjectWindow(proj) {
         let allS = [], allE = [];
         (proj.phases || []).forEach(ph => {
-          (ph.team_rows || []).forEach(r => { if (r.start) allS.push(r.start); if (r.end) allE.push(r.end); });
+          allPhaseRows(ph).forEach(({row: r}) => { if (r.start) allS.push(r.start); if (r.end) allE.push(r.end); });
           (ph.releases || []).forEach(r => { if (r.start) allS.push(r.start); if (r.end) allE.push(r.end); });
         });
         return {
@@ -10012,7 +10028,7 @@
         const ds = [];
         if (!plan) return ds;
         plan.projects.forEach(p => p.phases.forEach(ph => {
-          ph.team_rows.forEach(r => { if (r.start) ds.push(new Date(r.start)); if (r.end) ds.push(new Date(r.end)); });
+          allPhaseRows(ph).forEach(({row:r}) => { if (r.start) ds.push(new Date(r.start)); if (r.end) ds.push(new Date(r.end)); });
           ph.releases.forEach(r => { if (r.start) ds.push(new Date(r.start)); if (r.end) ds.push(new Date(r.end)); });
         }));
         return ds;
@@ -10175,8 +10191,11 @@
                               )}
                               {canEdit && (
                                 <div style={{ display:'flex', gap:4, marginLeft:'auto' }}>
-                                  <button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows.push({id:uid(),team:'New',status:'TBD',pct:null,days:null,start:null,end:null}); })}
-                                    style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid #6366f1', background:'transparent', color:'#6366f1', cursor:'pointer' }}>+ Row</button>
+                                  {/* + Row only for flat phases; staged phases show + Row inside each stage header */}
+                                  {!(phase.stages && phase.stages.length) && (
+                                    <button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows.push({id:uid(),team:'New',status:'TBD',pct:null,days:null,start:null,end:null}); })}
+                                      style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid #6366f1', background:'transparent', color:'#6366f1', cursor:'pointer' }}>+ Row</button>
+                                  )}
                                   <button onClick={() => updatePhase(pi, phi, n => { const rels=n.projects[pi].phases[phi].releases; rels.push({id:uid(),name:'Release '+(rels.length+1),days:null,start:null,end:null}); })}
                                     style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid #f59e0b', background:'transparent', color:'#f59e0b', cursor:'pointer' }}>+ Release</button>
                                   <button
@@ -10195,134 +10214,160 @@
                             </div>
                           </td>
                         </tr>
-                        {/* Team rows */}
-                        {phase.team_rows.map((row, ri) => {
-                          const codeMapNow = buildCodeMap(plan);
-                          const depStart = resolveDepStart(row, codeMapNow);
-                          const startIsAuto = !!(row.depends_on && row.depends_on.length && depStart);
-                          const endAuto = row.days != null && !!(startIsAuto ? depStart : row.start);
-                          const code = rowCode(pi, phi, row.team);
-                          const deps = row.depends_on || [];
-                          // All available codes for dropdown (exclude self)
-                          const allCodes = Object.keys(codeMapNow).filter(c => c !== code);
-                          return (
-                            <tr key={row.id} style={{ borderTop:'1px solid var(--border)', background:ri%2===0?'transparent':'rgba(0,0,0,.015)' }}>
-                              {/* Team + code */}
-                              <td style={{ padding:'5px 12px' }}>
-                                <div style={{ fontWeight:700, fontSize:12, color:'var(--fg)' }}>
+                        {/* Team rows — staged or flat */}
+                        {(() => {
+                          // Helper: render a single team row (used for both flat and staged)
+                          function renderRow(row, ri, code, si) {
+                            const codeMapNow = buildCodeMap(plan);
+                            const depStart = resolveDepStart(row, codeMapNow);
+                            const startIsAuto = !!(row.depends_on && row.depends_on.length && depStart);
+                            const endAuto = row.days != null && !!(startIsAuto ? depStart : row.start);
+                            const deps = row.depends_on || [];
+                            const allCodes = Object.keys(codeMapNow).filter(c => c !== code);
+                            const isStaged = si != null;
+                            const codeColor = isStaged ? (si===0?'#8b5cf6':'#0ea5e9') : 'var(--brand)';
+                            const upd = (f,v) => isStaged ? updateStagedRow(pi,phi,si,ri,f,v) : updateTeamRow(pi,phi,ri,f,v);
+                            const getRow = n => isStaged ? n.projects[pi].phases[phi].stages[si].team_rows[ri] : n.projects[pi].phases[phi].team_rows[ri];
+                            const delRow = () => updatePhase(pi, phi, n => {
+                              if (isStaged) n.projects[pi].phases[phi].stages[si].team_rows.splice(ri,1);
+                              else n.projects[pi].phases[phi].team_rows.splice(ri,1);
+                            });
+                            return (
+                              <tr key={row.id} style={{ borderTop:'1px solid var(--border)', background:ri%2===0?'transparent':'rgba(0,0,0,.015)' }}>
+                                <td style={{ padding:'5px 12px' }}>
+                                  <div style={{ fontWeight:700, fontSize:12, color:'var(--fg)' }}>
+                                    {canEdit
+                                      ? <input value={row.team} onChange={e => updatePhase(pi, phi, n => { getRow(n).team = e.target.value; })}
+                                          style={{ width:80, background:'transparent', border:'none', outline:'none', fontWeight:700, color:'var(--fg)', fontSize:12 }} />
+                                      : row.team}
+                                  </div>
+                                  <div style={{ fontSize:9, color:codeColor, fontWeight:700, letterSpacing:'.03em', marginTop:1, opacity:.7 }}>{code}</div>
+                                </td>
+                                <td style={{ padding:'4px 8px' }}>
                                   {canEdit
-                                    ? <input value={row.team} onChange={e => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows[ri].team = e.target.value; })}
-                                        style={{ width:80, background:'transparent', border:'none', outline:'none', fontWeight:700, color:'var(--fg)', fontSize:12 }} />
-                                    : row.team}
-                                </div>
-                                <div style={{ fontSize:9, color:'var(--brand)', fontWeight:700, letterSpacing:'.03em', marginTop:1, opacity:.7 }}>{code}</div>
-                              </td>
-                              {/* Status */}
-                              <td style={{ padding:'4px 8px' }}>
-                                {canEdit
-                                  ? <select value={row.status||'TBD'} onChange={e => updateTeamRow(pi,phi,ri,'status',e.target.value)}
-                                      style={{ background:!row.status||row.status==='TBD'?'rgba(99,102,241,.06)':'var(--s2)', border:!row.status||row.status==='TBD'?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, color:statusColor(row.status), fontSize:11, fontWeight:600, padding:'3px 6px', width:'100%' }}>
-                                      {['TBD','Not Started','In Progress','Completed','Completed - Rework','At Risk'].map(o => <option key={o} value={o}>{o}</option>)}
-                                    </select>
-                                  : <span style={{ fontSize:10, padding:'2px 8px', borderRadius:10, background:statusColor(row.status)+'22', color:statusColor(row.status), fontWeight:600 }}>{row.status||'TBD'}</span>}
-                              </td>
-                              {/* % */}
-                              <td style={{ padding:'4px 4px', textAlign:'center' }}>
-                                {canEdit
-                                  ? <input type="number" defaultValue={row.pct??''} key={row.id+'_pct_'+row.pct} placeholder="%" min="0" max="100"
-                                      onBlur={e => { const v=e.target.value.trim(); updateTeamRow(pi,phi,ri,'pct',v===''?null:parseFloat(v)); }}
-                                      onKeyDown={e => e.key==='Enter'&&e.target.blur()}
-                                      style={{ width:46, background:row.pct==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.pct==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.pct==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
-                                  : <span style={{ fontWeight:700, color:row.pct==null?'#94a3b8':phaseColor(row.pct) }}>{row.pct!=null?row.pct+'%':'—'}</span>}
-                              </td>
-                              {/* Weeks (auto-converts to days) */}
-                              <td style={{ padding:'4px 4px', textAlign:'center' }}>
-                                {canEdit
-                                  ? <input type="number" defaultValue={row.days!=null ? Math.round(row.days/5) : ''} key={row.id+'_wks_'+row.days} placeholder="—" min="0" step="0.5"
-                                      title="Enter weeks → auto-converts to working days"
-                                      onBlur={e => { const v=e.target.value.trim(); if(v!=='') updateTeamRow(pi,phi,ri,'days', Math.round(parseFloat(v)*5)); }}
-                                      onKeyDown={e => e.key==='Enter'&&e.target.blur()}
-                                      style={{ width:40, background:'rgba(34,197,94,.06)', border:'1px dashed rgba(34,197,94,.4)', borderRadius:4, padding:'3px 4px', color:'#16a34a', fontSize:11, textAlign:'center' }} />
-                                  : <span style={{ color:row.days==null?'#94a3b8':'#16a34a', fontWeight:row.days!=null?600:400 }}>{row.days!=null?Math.round(row.days/5)+'w':'—'}</span>}
-                              </td>
-                              {/* Days (working) */}
-                              <td style={{ padding:'4px 4px', textAlign:'center' }}>
-                                {canEdit
-                                  ? <input type="number" defaultValue={row.days??''} key={row.id+'_days_'+row.days} placeholder="—" min="0"
-                                      onBlur={e => { const v=e.target.value.trim(); updateTeamRow(pi,phi,ri,'days',v===''?null:parseFloat(v)); }}
-                                      onKeyDown={e => e.key==='Enter'&&e.target.blur()}
-                                      style={{ width:46, background:row.days==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.days==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.days==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
-                                  : <span style={{ color:row.days==null?'#94a3b8':'var(--fg)', fontWeight:row.days!=null?600:400 }}>{row.days??'—'}</span>}
-                              </td>
-                              {/* Depends On */}
-                              <td style={{ padding:'4px 8px', minWidth:200 }}>
-                                <div style={{ display:'flex', flexWrap:'wrap', gap:3, alignItems:'center' }}>
-                                  {deps.map((dep, di) => (
-                                    <span key={di} style={{ display:'inline-flex', alignItems:'center', gap:3, fontSize:10, background:'rgba(245,158,11,.12)', color:'#b45309', border:'1px solid rgba(245,158,11,.3)', borderRadius:10, padding:'1px 7px', fontWeight:700, whiteSpace:'nowrap' }}>
-                                      <span style={{ color:'var(--muted)', fontWeight:400 }}>{dep.type||'FS'}</span>
-                                      <span style={{ margin:'0 2px' }}>↗</span>
-                                      {dep.ref}
-                                      {canEdit && <span onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows[ri].depends_on.splice(di,1); })} style={{ cursor:'pointer', color:'#ef4444', marginLeft:3, fontWeight:700 }}>×</span>}
-                                    </span>
-                                  ))}
-                                  {canEdit && (
-                                    <select
-                                      value=""
-                                      onChange={e => {
-                                        const ref = e.target.value;
-                                        if (!ref) return;
-                                        updatePhase(pi, phi, n => {
-                                          const r = n.projects[pi].phases[phi].team_rows[ri];
-                                          if (!r.depends_on) r.depends_on = [];
-                                          if (!r.depends_on.find(d => d.ref === ref)) {
-                                            r.depends_on.push({ ref, type:'FS', lag:0 });
-                                          }
-                                          const cm = buildCodeMap(n);
-                                          autoCalc(r, cm);
-                                        });
-                                      }}
-                                      style={{ fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px dashed #f59e0b', background:'rgba(245,158,11,.06)', color:'#b45309', cursor:'pointer', maxWidth:120 }}>
-                                      <option value="">+ Add dep…</option>
-                                      {allCodes.map(c => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                  )}
-                                  {!deps.length && !canEdit && <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>}
-                                </div>
-                              </td>
-                              {/* Start (auto from dep or manual) */}
-                              <td style={{ padding:'4px 4px', textAlign:'center' }}>
-                                {startIsAuto
-                                  ? <span style={{ color:'#f59e0b', fontWeight:600, fontSize:11, whiteSpace:'nowrap' }} title="Auto-calculated from dependency">{depStart} ↗</span>
-                                  : canEdit
-                                    ? <input type="date" defaultValue={row.start??''} key={row.id+'_start_'+row.start}
-                                        onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'start',v===''?null:v); }}
-                                        style={{ background:row.start==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.start==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.start==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                    : <span style={{ color:row.start==null?'#94a3b8':'var(--fg)' }}>{row.start?fmt(row.start):'—'}</span>}
-                              </td>
-                              {/* End (auto from start+days or dep) */}
-                              <td style={{ padding:'4px 8px', textAlign:'center' }}>
-                                {(() => {
-                                  // Compute end from dep-driven start + days (Fix A)
-                                  const autoEnd = (startIsAuto && row.days && depStart)
-                                    ? addWorkDays(depStart, row.days - 1) : null;
-                                  const dispEnd = autoEnd || row.end;
-                                  if (canEdit) return (
-                                    <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
-                                      <input type="date" defaultValue={dispEnd??''} key={row.id+'_end_'+(dispEnd??'')}
-                                        onBlur={e => { const v=e.target.value; updateTeamRow(pi,phi,ri,'end',v===''?null:v); }}
-                                        style={{ background:dispEnd==null?'rgba(99,102,241,.05)':'var(--s2)', border:dispEnd==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:dispEnd==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
-                                      {(endAuto || autoEnd) && <span style={{ color:'#6366f1', fontWeight:700, fontSize:10 }} title="Auto-calculated from Start + Days (you can override)">⟵</span>}
-                                    </div>
-                                  );
-                                  return <span style={{ color:dispEnd==null?'#94a3b8':'var(--fg)' }}>
-                                    {dispEnd ? (autoEnd ? <>{fmt(dispEnd)} <span style={{ color:'#f59e0b', fontSize:9 }} title="Auto from dependency">↗</span></> : fmt(dispEnd)) : '—'}
-                                  </span>;
-                                })()}
-                              </td>
-                              {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={() => updatePhase(pi, phi, n => { n.projects[pi].phases[phi].team_rows.splice(ri,1); })} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
-                            </tr>
-                          );
-                        })}
+                                    ? <select value={row.status||'TBD'} onChange={e => upd('status',e.target.value)}
+                                        style={{ background:!row.status||row.status==='TBD'?'rgba(99,102,241,.06)':'var(--s2)', border:!row.status||row.status==='TBD'?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, color:statusColor(row.status), fontSize:11, fontWeight:600, padding:'3px 6px', width:'100%' }}>
+                                        {['TBD','Not Started','In Progress','Completed','Completed - Rework','At Risk'].map(o => <option key={o} value={o}>{o}</option>)}
+                                      </select>
+                                    : <span style={{ fontSize:10, padding:'2px 8px', borderRadius:10, background:statusColor(row.status)+'22', color:statusColor(row.status), fontWeight:600 }}>{row.status||'TBD'}</span>}
+                                </td>
+                                <td style={{ padding:'4px 4px', textAlign:'center' }}>
+                                  {canEdit
+                                    ? <input type="number" defaultValue={row.pct??''} key={row.id+'_pct_'+row.pct} placeholder="%" min="0" max="100"
+                                        onBlur={e => { const v=e.target.value.trim(); upd('pct',v===''?null:parseFloat(v)); }}
+                                        onKeyDown={e => e.key==='Enter'&&e.target.blur()}
+                                        style={{ width:46, background:row.pct==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.pct==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.pct==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
+                                    : <span style={{ fontWeight:700, color:row.pct==null?'#94a3b8':phaseColor(row.pct) }}>{row.pct!=null?row.pct+'%':'—'}</span>}
+                                </td>
+                                <td style={{ padding:'4px 4px', textAlign:'center' }}>
+                                  {canEdit
+                                    ? <input type="number" defaultValue={row.days!=null ? Math.round(row.days/5) : ''} key={row.id+'_wks_'+row.days} placeholder="—" min="0" step="0.5"
+                                        title="Enter weeks → auto-converts to working days"
+                                        onBlur={e => { const v=e.target.value.trim(); if(v!=='') upd('days', Math.round(parseFloat(v)*5)); }}
+                                        onKeyDown={e => e.key==='Enter'&&e.target.blur()}
+                                        style={{ width:40, background:'rgba(34,197,94,.06)', border:'1px dashed rgba(34,197,94,.4)', borderRadius:4, padding:'3px 4px', color:'#16a34a', fontSize:11, textAlign:'center' }} />
+                                    : <span style={{ color:row.days==null?'#94a3b8':'#16a34a', fontWeight:row.days!=null?600:400 }}>{row.days!=null?Math.round(row.days/5)+'w':'—'}</span>}
+                                </td>
+                                <td style={{ padding:'4px 4px', textAlign:'center' }}>
+                                  {canEdit
+                                    ? <input type="number" defaultValue={row.days??''} key={row.id+'_days_'+row.days} placeholder="—" min="0"
+                                        onBlur={e => { const v=e.target.value.trim(); upd('days',v===''?null:parseFloat(v)); }}
+                                        onKeyDown={e => e.key==='Enter'&&e.target.blur()}
+                                        style={{ width:46, background:row.days==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.days==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 4px', color:row.days==null?'#94a3b8':'var(--fg)', fontSize:11, textAlign:'center' }} />
+                                    : <span style={{ color:row.days==null?'#94a3b8':'var(--fg)', fontWeight:row.days!=null?600:400 }}>{row.days??'—'}</span>}
+                                </td>
+                                <td style={{ padding:'4px 8px', minWidth:200 }}>
+                                  <div style={{ display:'flex', flexWrap:'wrap', gap:3, alignItems:'center' }}>
+                                    {deps.map((dep, di) => (
+                                      <span key={di} style={{ display:'inline-flex', alignItems:'center', gap:3, fontSize:10, background:'rgba(245,158,11,.12)', color:'#b45309', border:'1px solid rgba(245,158,11,.3)', borderRadius:10, padding:'1px 7px', fontWeight:700, whiteSpace:'nowrap' }}>
+                                        <span style={{ color:'var(--muted)', fontWeight:400 }}>{dep.type||'FS'}</span>
+                                        <span style={{ margin:'0 2px' }}>↗</span>
+                                        {dep.ref}
+                                        {canEdit && <span onClick={() => updatePhase(pi, phi, n => { getRow(n).depends_on.splice(di,1); })} style={{ cursor:'pointer', color:'#ef4444', marginLeft:3, fontWeight:700 }}>×</span>}
+                                      </span>
+                                    ))}
+                                    {canEdit && (
+                                      <select value="" onChange={e => {
+                                          const ref = e.target.value;
+                                          if (!ref) return;
+                                          updatePhase(pi, phi, n => {
+                                            const r = getRow(n);
+                                            if (!r.depends_on) r.depends_on = [];
+                                            if (!r.depends_on.find(d => d.ref === ref)) r.depends_on.push({ ref, type:'FS', lag:0 });
+                                            const cm = buildCodeMap(n);
+                                            autoCalc(r, cm);
+                                          });
+                                        }}
+                                        style={{ fontSize:10, padding:'2px 4px', borderRadius:4, border:'1px dashed #f59e0b', background:'rgba(245,158,11,.06)', color:'#b45309', cursor:'pointer', maxWidth:120 }}>
+                                        <option value="">+ Add dep…</option>
+                                        {allCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                                      </select>
+                                    )}
+                                    {!deps.length && !canEdit && <span style={{ color:'var(--muted)', fontSize:11 }}>—</span>}
+                                  </div>
+                                </td>
+                                <td style={{ padding:'4px 4px', textAlign:'center' }}>
+                                  {startIsAuto
+                                    ? <span style={{ color:'#f59e0b', fontWeight:600, fontSize:11, whiteSpace:'nowrap' }} title="Auto-calculated from dependency">{depStart} ↗</span>
+                                    : canEdit
+                                      ? <input type="date" defaultValue={row.start??''} key={row.id+'_start_'+row.start}
+                                          onBlur={e => { const v=e.target.value; upd('start',v===''?null:v); }}
+                                          style={{ background:row.start==null?'rgba(99,102,241,.05)':'var(--s2)', border:row.start==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:row.start==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
+                                      : <span style={{ color:row.start==null?'#94a3b8':'var(--fg)' }}>{row.start?fmt(row.start):'—'}</span>}
+                                </td>
+                                <td style={{ padding:'4px 8px', textAlign:'center' }}>
+                                  {(() => {
+                                    const autoEnd = (startIsAuto && row.days && depStart) ? addWorkDays(depStart, row.days - 1) : null;
+                                    const dispEnd = autoEnd || row.end;
+                                    if (canEdit) return (
+                                      <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+                                        <input type="date" defaultValue={dispEnd??''} key={row.id+'_end_'+(dispEnd??'')}
+                                          onBlur={e => { const v=e.target.value; upd('end',v===''?null:v); }}
+                                          style={{ background:dispEnd==null?'rgba(99,102,241,.05)':'var(--s2)', border:dispEnd==null?'1px dashed var(--border)':'1px solid var(--border)', borderRadius:4, padding:'3px 5px', color:dispEnd==null?'#94a3b8':'var(--fg)', fontSize:11 }} />
+                                        {(endAuto || autoEnd) && <span style={{ color:'#6366f1', fontWeight:700, fontSize:10 }} title="Auto-calculated from Start + Days">⟵</span>}
+                                      </div>
+                                    );
+                                    return <span style={{ color:dispEnd==null?'#94a3b8':'var(--fg)' }}>
+                                      {dispEnd ? (autoEnd ? <>{fmt(dispEnd)} <span style={{ color:'#f59e0b', fontSize:9 }}>↗</span></> : fmt(dispEnd)) : '—'}
+                                    </span>;
+                                  })()}
+                                </td>
+                                {canEdit && <td style={{ padding:'4px', textAlign:'center' }}><button onClick={delRow} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:14 }}>✕</button></td>}
+                              </tr>
+                            );
+                          }
+
+                          if (phase.stages && phase.stages.length) {
+                            // ── Staged phase: show stage sub-headers ──
+                            return phase.stages.map((stage, si) => {
+                              const accent = si === 0 ? '#8b5cf6' : '#0ea5e9';
+                              const bgFill = si === 0 ? 'rgba(139,92,246,.06)' : 'rgba(14,165,233,.05)';
+                              return (
+                                <React.Fragment key={stage.id}>
+                                  <tr style={{ background:bgFill, borderTop:`2px solid ${accent}33` }}>
+                                    <td colSpan={canEdit ? 9 : 8} style={{ padding:'4px 12px 4px 24px' }}>
+                                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                        <span style={{ fontSize:9, fontWeight:800, color:accent, background:accent+'1a', padding:'2px 8px', borderRadius:8, textTransform:'uppercase', letterSpacing:'.07em' }}>
+                                          {canEdit
+                                            ? <input value={stage.name} onChange={e => updatePhase(pi,phi,n => { n.projects[pi].phases[phi].stages[si].name = e.target.value; })}
+                                                style={{ background:'transparent', border:'none', outline:'none', fontWeight:800, color:accent, fontSize:9, textTransform:'uppercase', letterSpacing:'.07em', minWidth:120 }} />
+                                            : (stage.name || `Stage ${si+1}`)}
+                                        </span>
+                                        {canEdit && (
+                                          <button onClick={() => updatePhase(pi,phi,n => { n.projects[pi].phases[phi].stages[si].team_rows.push({id:uid(),team:'New',status:'TBD',pct:null,days:null,start:null,end:null}); })}
+                                            style={{ fontSize:9, padding:'1px 6px', borderRadius:4, border:`1px solid ${accent}`, background:'transparent', color:accent, cursor:'pointer' }}>+ Row</button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {stage.team_rows.map((row, ri) => renderRow(row, ri, rowCode(pi, phi, row.team, si), si))}
+                                </React.Fragment>
+                              );
+                            });
+                          }
+                          // ── Flat phase (old style, e.g. Audit Ph1 & Ph2) ──
+                          return phase.team_rows.map((row, ri) => renderRow(row, ri, rowCode(pi, phi, row.team), null));
+                        })()}
                         {/* Release rows (indented, amber) */}
                         {phase.releases.map((rel, ri) => {
                           const endAuto = rel.days != null && !!rel.start;
@@ -10558,7 +10603,7 @@
                         {/* Phase sub-rows */}
                         {isExpanded && proj.phases.map((ph, phi) => {
                           let phS=[], phE=[];
-                          ph.team_rows.forEach(r => { if(r.start) phS.push(r.start); if(r.end) phE.push(r.end); });
+                          allPhaseRows(ph).forEach(({row:r}) => { if(r.start) phS.push(r.start); if(r.end) phE.push(r.end); });
                           const pStart = phS.length?phS.sort()[0]:null, pEnd = phE.length?phE.sort().reverse()[0]:null;
                           const pbp = barPos(pStart, pEnd, cols);
                           const phPct = calcPhasePct(ph);
@@ -10624,7 +10669,7 @@
                   {plan.projects.map((proj, i) => {
                     const pct = calcProjectPct(proj);
                     let allS2=[], allE2=[];
-                    proj.phases.forEach(ph => { ph.team_rows.forEach(r => { if(r.start) allS2.push(r.start); if(r.end) allE2.push(r.end); }); });
+                    proj.phases.forEach(ph => { allPhaseRows(ph).forEach(({row:r}) => { if(r.start) allS2.push(r.start); if(r.end) allE2.push(r.end); }); });
                     const computedS = allS2.length?allS2.sort()[0]:null;
                     const computedE = allE2.length?allE2.sort().reverse()[0]:null;
                     const shownS = proj.summary_start || computedS;
@@ -10733,12 +10778,12 @@
                                   {proj.phases.map((ph, phi) => {
                                     const phPct = calcPhasePct(ph);
                                     let phS=[], phE=[];
-                                    ph.team_rows.forEach(r => { if(r.start) phS.push(r.start); if(r.end) phE.push(r.end); });
+                                    allPhaseRows(ph).forEach(({row:r}) => { if(r.start) phS.push(r.start); if(r.end) phE.push(r.end); });
                                     const phStart = phS.length?phS.sort()[0]:null;
                                     const phEnd = phE.length?phE.sort().reverse()[0]:null;
                                     // build status summary chips
                                     const statusGroups = {};
-                                    ph.team_rows.forEach(r => {
+                                    allPhaseRows(ph).forEach(({row:r}) => {
                                       const s = r.status || 'TBD';
                                       if (!statusGroups[s]) statusGroups[s] = [];
                                       statusGroups[s].push(r.team);
@@ -10749,7 +10794,7 @@
                                           <span style={{ fontSize:10, color:'var(--brand)', marginRight:6, fontWeight:800 }}>Ph{phi+1}</span>
                                           {ph.name}
                                         </td>
-                                        <td style={{ padding:'6px 12px', textAlign:'center', color:'var(--muted)' }}>{ph.team_rows.length}</td>
+                                        <td style={{ padding:'6px 12px', textAlign:'center', color:'var(--muted)' }}>{allPhaseRows(ph).length}</td>
                                         <td style={{ padding:'6px 12px' }}>
                                           {phPct!=null
                                             ? <div style={{ display:'flex', alignItems:'center', gap:6 }}>
