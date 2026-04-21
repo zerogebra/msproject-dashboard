@@ -10668,13 +10668,23 @@
                 <tbody>
                   {plan.projects.map((proj, i) => {
                     const pct = calcProjectPct(proj);
+                    // Collect start dates and end dates (real + estimated from start+days)
                     let allS2=[], allE2=[];
-                    proj.phases.forEach(ph => { allPhaseRows(ph).forEach(({row:r}) => { if(r.start) allS2.push(r.start); if(r.end) allE2.push(r.end); }); });
+                    let projHasEst = false;
+                    proj.phases.forEach(ph => {
+                      allPhaseRows(ph).forEach(({row:r}) => {
+                        if(r.start) allS2.push(r.start);
+                        if(r.end) { allE2.push(r.end); }
+                        else if(r.start && r.days) { allE2.push(addWorkDays(r.start, r.days-1)); projHasEst = true; }
+                      });
+                    });
                     const computedS = allS2.length?allS2.sort()[0]:null;
                     const computedE = allE2.length?allE2.sort().reverse()[0]:null;
                     const shownS = proj.summary_start || computedS;
-                    // Requirement: default End in Program Summary should be TBD until admin sets or syncs
-                    const shownE = (proj.summary_end !== undefined && proj.summary_end !== null) ? proj.summary_end : null;
+                    // If admin has explicitly set summary_end use it; otherwise use computed (with est flag)
+                    const adminEnd = (proj.summary_end !== undefined && proj.summary_end !== null) ? proj.summary_end : null;
+                    const shownE = adminEnd || computedE;
+                    const shownEIsEst = !adminEnd && projHasEst;
                     const shownPct = (proj.summary_pct != null) ? proj.summary_pct : pct;
                     const isExpanded = !!summaryExpanded[proj.id];
                     const toggle = () => setSummaryExpanded(s => ({ ...s, [proj.id]: !s[proj.id] }));
@@ -10718,13 +10728,17 @@
                                   style={{ background:'var(--s2)', border:'1px solid var(--border)', borderRadius:4, padding:'2px 6px', color:'var(--fg)', fontSize:11 }} />
                               : (shownS?fmt(shownS):'—')}
                           </td>
-                          <td style={{ padding:'8px 12px', color:'var(--muted)', fontSize:11 }}>
+                          <td style={{ padding:'8px 12px', fontSize:11 }}>
                             {canEdit
-                              ? <input type="date" value={shownE||''}
+                              ? <input type="date" value={adminEnd||''}
                                   onClick={e => e.stopPropagation()}
                                   onChange={e => update(n => { n.projects[i].summary_end = e.target.value || null; })}
                                   style={{ background:'var(--s2)', border:'1px solid var(--border)', borderRadius:4, padding:'2px 6px', color:'var(--fg)', fontSize:11 }} />
-                              : (shownE?fmt(shownE):'TBD')}
+                              : shownE
+                                ? shownEIsEst
+                                  ? <span style={{ color:'#f59e0b', fontWeight:600 }}>est. {fmt(shownE)}</span>
+                                  : <span style={{ color:'var(--muted)' }}>{fmt(shownE)}</span>
+                                : <span style={{ color:'#94a3b8' }}>—</span>}
                           </td>
                           <td style={{ padding:'8px 8px', textAlign:'center' }}>
                             <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
@@ -10737,7 +10751,11 @@
                                       const pRef = n.projects[i];
                                       let s=[], e2=[];
                                       (pRef.phases||[]).forEach(ph => {
-                                        (ph.team_rows||[]).forEach(r => { if(r.start) s.push(r.start); if(r.end) e2.push(r.end); });
+                                        allPhaseRows(ph).forEach(({row:r}) => {
+                                          if(r.start) s.push(r.start);
+                                          if(r.end) e2.push(r.end);
+                                          else if(r.start && r.days) e2.push(addWorkDays(r.start, r.days-1));
+                                        });
                                       });
                                       pRef.summary_start = s.length ? s.sort()[0] : null;
                                       pRef.summary_end = e2.length ? e2.sort().reverse()[0] : null;
@@ -10777,8 +10795,12 @@
                                 <tbody>
                                   {proj.phases.map((ph, phi) => {
                                     const phPct = calcPhasePct(ph);
-                                    let phS=[], phE=[];
-                                    allPhaseRows(ph).forEach(({row:r}) => { if(r.start) phS.push(r.start); if(r.end) phE.push(r.end); });
+                                    let phS=[], phE=[], phHasEst=false;
+                                    allPhaseRows(ph).forEach(({row:r}) => {
+                                      if(r.start) phS.push(r.start);
+                                      if(r.end) { phE.push(r.end); }
+                                      else if(r.start && r.days) { phE.push(addWorkDays(r.start, r.days-1)); phHasEst=true; }
+                                    });
                                     const phStart = phS.length?phS.sort()[0]:null;
                                     const phEnd = phE.length?phE.sort().reverse()[0]:null;
                                     // build status summary chips
@@ -10806,7 +10828,13 @@
                                             : <span style={{ color:'#94a3b8' }}>TBD</span>}
                                         </td>
                                         <td style={{ padding:'6px 12px', color:'var(--muted)' }}>{phStart?fmt(phStart):'—'}</td>
-                                        <td style={{ padding:'6px 12px', color:'var(--muted)' }}>{phEnd?fmt(phEnd):'—'}</td>
+                                        <td style={{ padding:'6px 12px' }}>
+                                          {phEnd
+                                            ? phHasEst
+                                              ? <span style={{ color:'#f59e0b', fontWeight:600 }}>est. {fmt(phEnd)}</span>
+                                              : <span style={{ color:'var(--muted)' }}>{fmt(phEnd)}</span>
+                                            : <span style={{ color:'#94a3b8' }}>—</span>}
+                                        </td>
                                         <td style={{ padding:'6px 12px' }}>
                                           <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                                             {Object.entries(statusGroups).map(([st, teams]) => (
