@@ -212,7 +212,8 @@ def portfolio(username: str = "user"):
                 "stakeholder":      p["stakeholder"] if "stakeholder" in p.keys() else None,
                 "sync_locked":      bool(p["sync_locked"]) if "sync_locked" in p.keys() else False,
                 "requested_by":          p["requested_by"] if "requested_by" in p.keys() else None,
-                "exec_additional_days":  p["exec_additional_days"] if "exec_additional_days" in p.keys() else None,
+                "exec_additional_days":      p["exec_additional_days"] if "exec_additional_days" in p.keys() else None,
+                "exec_additional_days_impl": p["exec_additional_days_impl"] if "exec_additional_days_impl" in p.keys() else None,
                 "items":            items,
             })
 
@@ -632,6 +633,7 @@ def update_project_requested_by(code: str, req: ProjectRequestedByUpdate, caller
 
 class ProjectExecSummaryUpdate(BaseModel):
     exec_additional_days: Optional[int] = None
+    exec_additional_days_impl: Optional[int] = None
 
 @app.put("/api/projects/{code}/exec-summary")
 def update_project_exec_summary(code: str, req: ProjectExecSummaryUpdate, caller_id: str):
@@ -641,11 +643,43 @@ def update_project_exec_summary(code: str, req: ProjectExecSummaryUpdate, caller
         p = conn.execute("SELECT code FROM projects WHERE code=?", (code,)).fetchone()
         if not p:
             raise HTTPException(404, "Project not found.")
-        conn.execute(
-            "UPDATE projects SET exec_additional_days=? WHERE code=?",
-            (req.exec_additional_days, code)
-        )
+        updates = req.model_dump(exclude_unset=True)
+        if updates:
+            cols = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE projects SET {cols} WHERE code=?", list(updates.values()) + [code])
     return {"status": "ok"}
+
+
+@app.post("/api/admin/git-push")
+def admin_git_push(caller_id: str):
+    _require_admin(caller_id)
+    import subprocess, sys
+    from app.database import get_conn, DB_PATH
+    from datetime import datetime
+    # Flush WAL first
+    try:
+        with get_conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+    except Exception:
+        pass
+    repo_root = str(DB_PATH.parents[1])
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        subprocess.run(["git", "add", "."], cwd=repo_root, check=True, capture_output=True)
+        result = subprocess.run(
+            ["git", "commit", "-m", f"Dashboard auto-push {ts}"],
+            cwd=repo_root, capture_output=True, text=True
+        )
+        nothing_to_commit = "nothing to commit" in result.stdout or result.returncode == 1
+        if not nothing_to_commit and result.returncode != 0:
+            raise Exception(result.stderr or result.stdout)
+        push = subprocess.run(["git", "push"], cwd=repo_root, check=True, capture_output=True, text=True)
+        msg = "Already up to date — nothing new to push." if nothing_to_commit else f"Pushed successfully at {ts}."
+        return {"status": "ok", "message": msg}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, e.stderr or str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 class TaskUpdate(BaseModel):

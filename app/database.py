@@ -472,6 +472,12 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass
 
+        # schema v2.0 — exec summary impl buffer (separate from cubes buffer)
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN exec_additional_days_impl INTEGER")
+        except sqlite3.OperationalError:
+            pass
+
         # Seed default dashboard settings if missing
         row = conn.execute("SELECT id FROM dashboard_settings WHERE id='global'").fetchone()
         if not row:

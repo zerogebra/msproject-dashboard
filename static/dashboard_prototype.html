@@ -2692,6 +2692,7 @@
           stakeholder: p.stakeholder || '',
           requested_by: p.requested_by || null,
           exec_additional_days: p.exec_additional_days ?? null,
+          exec_additional_days_impl: p.exec_additional_days_impl ?? null,
           color, progress, health: rag(progress, pEnd, ss[0]), start: ss[0], end: pEnd, items
         };
       });
@@ -2798,6 +2799,10 @@
       updateProjectExecSummary: (code, data, callerId) =>
         fetch(`/api/projects/${code}/exec-summary?caller_id=${encodeURIComponent(callerId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
           .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Failed') })),
+
+      gitPush: (callerId) =>
+        fetch(`/api/admin/git-push?caller_id=${encodeURIComponent(callerId)}`, { method: 'POST' })
+          .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'Push failed') })),
 
       updateTask: (taskId, data, callerId) =>
         fetch(`/api/tasks/${taskId}?caller_id=${encodeURIComponent(callerId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
@@ -4178,18 +4183,20 @@
         setSavingRB(false);
       }
 
-      // Exec Summary extra days — display-only columns, CUBES table only
-      const [extraDaysMap, setExtraDaysMap] = useState({});   // local overrides after save
-      const [editingED, setEditingED] = useState(null);
+      // Exec Summary extra days — display-only columns
+      const [extraDaysMap, setExtraDaysMap] = useState({});          // CUBES buffer local overrides
+      const [extraDaysMapImpl, setExtraDaysMapImpl] = useState({});  // Impl buffer local overrides
+      const [editingED, setEditingED] = useState(null);   // {code, field}
       const [edDraft, setEdDraft] = useState('');
       const [savingED, setSavingED] = useState(false);
 
-      async function saveExtraDays(code) {
+      async function saveExtraDays(code, field) {
         const val = edDraft === '' ? null : parseInt(edDraft);
         setSavingED(true);
         try {
-          await api.updateProjectExecSummary(code, { exec_additional_days: val }, user?.id || '');
-          setExtraDaysMap(m => ({ ...m, [code]: val }));
+          await api.updateProjectExecSummary(code, { [field]: val }, user?.id || '');
+          if (field === 'exec_additional_days') setExtraDaysMap(m => ({ ...m, [code]: val }));
+          else setExtraDaysMapImpl(m => ({ ...m, [code]: val }));
           setEditingED(null);
         } catch (e) { alert('Failed to save: ' + e.message); }
         setSavingED(false);
@@ -4281,55 +4288,105 @@
 
       const ltrCell = { direction: 'ltr', unicodeBidi: 'isolate' };
 
-      const healthOrder = { R: 0, A: 1, G: 2 };
-      const healthColor = h => h === 'G' ? 'var(--g)' : h === 'A' ? 'var(--a)' : 'var(--r)';
-      const healthLabel = h => h === 'G' ? '🟢 On Track' : h === 'A' ? '🟡 At Risk' : '🔴 Delayed';
-      const cubesProjs = [...projects].filter(p => p.team_type !== 'implementation').sort((a, b) => (healthOrder[a.health] ?? 2) - (healthOrder[b.health] ?? 2));
-      const implProjs  = [...projects].filter(p => p.team_type === 'implementation').sort((a, b) => (healthOrder[a.health] ?? 2) - (healthOrder[b.health] ?? 2));
+      // Helpers — health + completion
+      const healthOrder = { R: 0, A: 1, G: 2, C: 3 };  // C = Completed (blue), always last
+      const healthColor = h => h === 'C' ? '#3b82f6' : h === 'G' ? 'var(--g)' : h === 'A' ? 'var(--a)' : 'var(--r)';
+      const healthLabel = h => h === 'C' ? '🔵 Completed' : h === 'G' ? '🟢 On Track' : h === 'A' ? '🟡 At Risk' : '🔴 Delayed';
+
+      function effectiveHealth(p, newDelayDays, newEndSet) {
+        // 100% plan AND actual → Completed (blue)
+        if (p.progress >= 100) return 'C';
+        // If buffer is set and new end passed → still red
+        if (newEndSet && newDelayDays > 0) return 'R';
+        // If buffer is set and new end is in future → on track (green)
+        if (newEndSet && newDelayDays === 0) return 'G';
+        // Fallback to original RAG
+        return p.health;
+      }
+
+      function sortByHealth(a, b, getH) {
+        const order = { R: 0, A: 1, G: 2, C: 3 };
+        return (order[getH(a)] ?? 2) - (order[getH(b)] ?? 2);
+      }
+
+      // Partition + sort: completed always last, rest by health
+      function splitRows(rows, getEffH) {
+        const active    = rows.filter(p => getEffH(p) !== 'C').sort((a, b) => sortByHealth(a, b, getEffH));
+        const completed = rows.filter(p => getEffH(p) === 'C');
+        return [...active, ...completed];
+      }
+
+      // Compute effective health for cubes (uses exec_additional_days)
+      function cubesEffH(p) {
+        const addDays = (p.code in extraDaysMap) ? extraDaysMap[p.code] : p.exec_additional_days;
+        const addDaysNum = addDays != null ? parseInt(addDays) : null;
+        const todayStr = TODAY.toISOString().split('T')[0];
+        const newEnd = (addDaysNum > 0 && p.end) ? addWorkDays(new Date(p.end), addDaysNum).toISOString().split('T')[0] : null;
+        const newDelay = (newEnd && newEnd < todayStr) ? Math.abs(days(newEnd, todayStr)) : 0;
+        return effectiveHealth(p, newDelay, !!newEnd);
+      }
+      // Compute effective health for impl (uses exec_additional_days_impl)
+      function implEffH(p) {
+        const addDays = (p.code in extraDaysMapImpl) ? extraDaysMapImpl[p.code] : p.exec_additional_days_impl;
+        const addDaysNum = addDays != null ? parseInt(addDays) : null;
+        const todayStr = TODAY.toISOString().split('T')[0];
+        const newEnd = (addDaysNum > 0 && p.end) ? addWorkDays(new Date(p.end), addDaysNum).toISOString().split('T')[0] : null;
+        const newDelay = (newEnd && newEnd < todayStr) ? Math.abs(days(newEnd, todayStr)) : 0;
+        return effectiveHealth(p, newDelay, !!newEnd);
+      }
+
+      const cubesProjs = splitRows([...projects].filter(p => p.team_type !== 'implementation'), cubesEffH);
+      const implProjs  = splitRows([...projects].filter(p => p.team_type === 'implementation'), implEffH);
 
       const hiddenCount = hiddenProjects.size;
 
-      function ProjTable({ rows, showExtraCols }) {
+      function ProjTable({ rows, bufferField }) {
         if (!rows.length) return <div style={{ fontSize: 12, color: 'var(--dim)', padding: '16px 12px', textAlign: 'center' }}>No projects in this group.</div>;
         const thStyle = { padding: '7px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', borderBottom: '2px solid var(--border2)', whiteSpace: 'nowrap' };
         const thExtraStyle = { ...thStyle, color: '#f59e0b', borderBottom: '2px solid rgba(245,158,11,.4)', background: 'rgba(245,158,11,.04)' };
+        const isImplTable = bufferField === 'exec_additional_days_impl';
         return (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: 'var(--s2)' }}>
-                  {['Project Name','Requested By','Start','End','Status','Plan %','Actual %','Delay (d)','Health','Comments & Justifications'].map(h => (
-                    <th key={h} style={thStyle}>{h}</th>
+                  {['Project Name','Requested By','Start','End','Status','Plan %','Actual %','Health','Comments & Justifications'].map(h => (
+                    <th key={h} style={h === 'Project Name' ? { ...thStyle, minWidth: 220 } : thStyle}>{h}</th>
                   ))}
-                  {showExtraCols && <>
-                    <th style={thExtraStyle} title="Display-only: extra buffer days for executive reporting">Add. Buffer</th>
-                    <th style={thExtraStyle} title="Display-only: revised end date (original end + buffer days)">New End</th>
-                    <th style={thExtraStyle} title="Display-only: delay only shown if new end date has already passed today">New Delay</th>
-                  </>}
+                  <th style={thExtraStyle} title="Display-only: extra buffer days for executive reporting">Add. Buffer</th>
+                  <th style={thExtraStyle} title="Display-only: revised end date (original end + buffer days)">New End</th>
+                  <th style={thExtraStyle} title="Display-only: delay only shown if new end date has already passed today">New Delay</th>
                   {canComment && <th style={thStyle}>Visibility</th>}
                 </tr>
               </thead>
               <tbody>
                 {rows.filter(p => !hiddenProjects.has(p.code)).map(p => {
-                  const hc = healthColor(p.health);
-                  const hl = healthLabel(p.health);
+                  // Compute buffer / new end / new delay for this row
+                  const localMap = isImplTable ? extraDaysMapImpl : extraDaysMap;
+                  const storedVal = isImplTable ? p.exec_additional_days_impl : p.exec_additional_days;
+                  const addDays = (p.code in localMap) ? localMap[p.code] : storedVal;
+                  const addDaysNum = addDays != null ? parseInt(addDays) : null;
+                  const todayStr = TODAY.toISOString().split('T')[0];
+                  const newEnd = (addDaysNum > 0 && p.end) ? addWorkDays(new Date(p.end), addDaysNum).toISOString().split('T')[0] : null;
+                  const newDelayDays = (newEnd && newEnd < todayStr) ? Math.abs(days(newEnd, todayStr)) : 0;
+                  const effH = effectiveHealth(p, newDelayDays, !!newEnd);
+                  const hc = healthColor(effH);
+                  const hl = healthLabel(effH);
+                  const isCompleted = effH === 'C';
                   const comment = comments[p.code] || '';
                   const isEditingThis = editingComment === p.code;
+                  const tdExtra = { padding: '6px 10px', background: 'rgba(245,158,11,.03)', borderLeft: '1px solid rgba(245,158,11,.15)' };
                   return (
-                    <tr key={p.code} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '8px 10px', fontWeight: 600, borderLeft: `3px solid ${hc}` }}>{p.name}</td>
+                    <tr key={p.code} style={{ borderBottom: '1px solid var(--border)', opacity: isCompleted ? 0.85 : 1, background: isCompleted ? 'rgba(59,130,246,.04)' : undefined }}>
+                      <td style={{ padding: '8px 10px', fontWeight: 600, borderLeft: `3px solid ${hc}`, minWidth: 220 }}>{p.name}</td>
                       <td style={{ padding: '6px 10px', fontSize: 11 }}>
                         {editingRB === p.code ? (
                           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                             <input autoFocus
                               style={{ fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--brand)', background: 'var(--s2)', color: 'var(--fg)', width: 120 }}
-                              value={rbDraft}
-                              placeholder="Name or team…"
+                              value={rbDraft} placeholder="Name or team…"
                               onChange={e => setRbDraft(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') saveRequestedBy(p.code);
-                                if (e.key === 'Escape') setEditingRB(null);
-                              }} />
+                              onKeyDown={e => { if (e.key === 'Enter') saveRequestedBy(p.code); if (e.key === 'Escape') setEditingRB(null); }} />
                             <button onClick={() => saveRequestedBy(p.code)} disabled={savingRB}
                               style={{ padding: '3px 7px', borderRadius: 4, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
                               {savingRB ? '…' : '✓'}
@@ -4340,7 +4397,6 @@
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                             {(() => {
-                              // Use local map (admin just edited) if present, else fall back to portfolio data
                               const rbVal = (p.code in requestedByMap) ? requestedByMap[p.code] : (p.requested_by || null);
                               return (
                                 <span style={{ color: rbVal ? 'var(--fg)' : 'var(--dim)', fontStyle: rbVal ? 'normal' : 'italic' }}>
@@ -4366,8 +4422,6 @@
                           const pStart = new Date(p.start), pEnd = new Date(p.end);
                           const todayD = new Date();
                           const planPct = todayD <= pStart ? 0 : todayD >= pEnd ? 100 : Math.round(((todayD - pStart) / (pEnd - pStart)) * 100);
-                          const delta = p.progress - planPct;
-                          const c = delta >= 0 ? 'var(--g)' : delta >= -15 ? '#f97316' : 'var(--r)';
                           return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{ fontWeight: 800, color: 'var(--muted)', minWidth: 32 }}>{planPct}%</span>
@@ -4386,18 +4440,9 @@
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                        {(() => {
-                          const leaves = p.items ? p.items.filter(t => !t.is_summary && !t.is_milestone) : [];
-                          const maxDelay = leaves.reduce((mx, t) => Math.max(mx, taskDelayDays(t)), 0);
-                          return maxDelay > 0
-                            ? <span style={{ fontWeight: 800, color: 'var(--r)', fontSize: 12 }}>+{maxDelay}d</span>
-                            : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>;
-                        })()}
-                      </td>
                       <td style={{ padding: '8px 10px' }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: hc }}>
-                          {p.health === 'G' ? '🟢' : p.health === 'A' ? '🟡' : '🔴'} {hl.split(' ')[1]}
+                          {effH === 'C' ? '🔵' : effH === 'G' ? '🟢' : effH === 'A' ? '🟡' : '🔴'} {hl.split(' ')[1]}
                         </span>
                       </td>
                       <td dir="ltr" style={{ padding: '5px 10px', minWidth: 200, ...ltrCell }}>
@@ -4408,7 +4453,6 @@
                               value={commentDraft} onChange={e => setCommentDraft(e.target.value)}
                               onFocus={e => { e.target.setAttribute('dir', 'ltr'); e.target.style.direction = 'ltr'; }}
                               onKeyDown={e => {
-                                // Block Windows Ctrl+Shift / Alt+Shift text-direction flip shortcut
                                 if (e.shiftKey && (e.ctrlKey || e.altKey) && !e.key.startsWith('Enter')) { e.preventDefault(); e.target.setAttribute('dir','ltr'); return; }
                                 if (e.key === 'Enter' && !e.altKey) { e.preventDefault(); saveComment(p.code, commentDraft); }
                                 if (e.key === 'Enter' && e.altKey) { setCommentDraft(d => d + '\n'); }
@@ -4431,58 +4475,45 @@
                           </div>
                         )}
                       </td>
-                      {showExtraCols && (() => {
-                        const addDays = (p.code in extraDaysMap) ? extraDaysMap[p.code] : p.exec_additional_days;
-                        const addDaysNum = addDays != null ? parseInt(addDays) : null;
-                        // New end = original project end + addDays working days
-                        const newEnd = (addDaysNum > 0 && p.end) ? addWorkDays(new Date(p.end), addDaysNum).toISOString().split('T')[0] : null;
-                        // New delay = only show if new end has already passed today (real overdue)
-                        const todayStr = TODAY.toISOString().split('T')[0];
-                        const newDelayDays = (newEnd && newEnd < todayStr) ? Math.abs(days(newEnd, todayStr)) : null;
-                        const tdExtra = { padding: '6px 10px', background: 'rgba(245,158,11,.03)', borderLeft: '1px solid rgba(245,158,11,.15)' };
-                        return (<>
-                          {/* Add. Days */}
-                          <td style={tdExtra}>
-                            {editingED === p.code ? (
-                              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                                <input autoFocus type="number" min="0" max="999"
-                                  style={{ width: 52, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid #f59e0b', background: 'var(--s2)', color: 'var(--fg)', textAlign: 'center' }}
-                                  value={edDraft}
-                                  placeholder="0"
-                                  onChange={e => setEdDraft(e.target.value)}
-                                  onKeyDown={e => { if (e.key === 'Enter') saveExtraDays(p.code); if (e.key === 'Escape') setEditingED(null); }} />
-                                <button onClick={() => saveExtraDays(p.code)} disabled={savingED}
-                                  style={{ padding: '3px 6px', borderRadius: 4, border: 'none', background: '#f59e0b', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>{savingED ? '…' : '✓'}</button>
-                                <button onClick={() => setEditingED(null)}
-                                  style={{ padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
-                              </div>
-                            ) : (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span style={{ fontWeight: addDaysNum > 0 ? 700 : 400, color: addDaysNum > 0 ? '#b45309' : 'var(--dim)', fontStyle: addDaysNum > 0 ? 'normal' : 'italic' }}>
-                                  {addDaysNum > 0 ? `+${addDaysNum}d` : '—'}
-                                </span>
-                                {isAdmin && (
-                                  <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11 }}
-                                    onClick={() => { setEdDraft(addDaysNum != null ? String(addDaysNum) : ''); setEditingED(p.code); }}
-                                    title="Set additional days (exec summary only)">✎</span>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                          {/* New End */}
-                          <td style={{ ...tdExtra, whiteSpace: 'nowrap' }}>
-                            <span style={{ fontWeight: newEnd ? 700 : 400, color: newEnd ? '#b45309' : 'var(--dim)', fontStyle: newEnd ? 'normal' : 'italic' }}>
-                              {newEnd ? fmt(newEnd) : '—'}
+                      {/* Add. Buffer */}
+                      <td style={tdExtra}>
+                        {editingED && editingED.code === p.code && editingED.field === bufferField ? (
+                          <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                            <input autoFocus type="number" min="0" max="999"
+                              style={{ width: 52, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid #f59e0b', background: 'var(--s2)', color: 'var(--fg)', textAlign: 'center' }}
+                              value={edDraft} placeholder="0"
+                              onChange={e => setEdDraft(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveExtraDays(p.code, bufferField); if (e.key === 'Escape') setEditingED(null); }} />
+                            <button onClick={() => saveExtraDays(p.code, bufferField)} disabled={savingED}
+                              style={{ padding: '3px 6px', borderRadius: 4, border: 'none', background: '#f59e0b', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>{savingED ? '…' : '✓'}</button>
+                            <button onClick={() => setEditingED(null)}
+                              style={{ padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span style={{ fontWeight: addDaysNum > 0 ? 700 : 400, color: addDaysNum > 0 ? '#b45309' : 'var(--dim)', fontStyle: addDaysNum > 0 ? 'normal' : 'italic' }}>
+                              {addDaysNum > 0 ? `+${addDaysNum}d` : '—'}
                             </span>
-                          </td>
-                          {/* New Delay — only shown when new end is already past today */}
-                          <td style={{ ...tdExtra, textAlign: 'right' }}>
-                            {newDelayDays > 0
-                              ? <span style={{ fontWeight: 800, color: 'var(--r)', fontSize: 12 }}>+{newDelayDays}d</span>
-                              : <span style={{ color: 'var(--dim)', fontSize: 11 }}>—</span>}
-                          </td>
-                        </>);
-                      })()}
+                            {isAdmin && (
+                              <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11 }}
+                                onClick={() => { setEdDraft(addDaysNum != null ? String(addDaysNum) : ''); setEditingED({ code: p.code, field: bufferField }); }}
+                                title="Set additional buffer days (exec summary only)">✎</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      {/* New End */}
+                      <td style={{ ...tdExtra, whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: newEnd ? 700 : 400, color: newEnd ? '#b45309' : 'var(--dim)', fontStyle: newEnd ? 'normal' : 'italic' }}>
+                          {newEnd ? fmt(newEnd) : '—'}
+                        </span>
+                      </td>
+                      {/* New Delay */}
+                      <td style={{ ...tdExtra, textAlign: 'right' }}>
+                        {newDelayDays > 0
+                          ? <span style={{ fontWeight: 800, color: 'var(--r)', fontSize: 12 }}>+{newDelayDays}d</span>
+                          : <span style={{ color: 'var(--dim)', fontSize: 11 }}>—</span>}
+                      </td>
                       {canComment && (
                         <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                           <button onClick={() => toggleHide(p.code)}
@@ -4492,12 +4523,12 @@
                       )}
                     </tr>
                   );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          );
-        }
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
 
       return (
         <div dir="ltr" style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 18, direction: 'ltr', unicodeBidi: 'isolate' }}>
@@ -4505,6 +4536,20 @@
             onClick={() => setOpen(o => !o)}>
             <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>📊 Executive Summary</span>
             <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>{projects.length} projects</span>
+            {/* PMO Status Legend */}
+            <div style={{ display: 'flex', gap: 8, marginLeft: 12, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+              {[
+                { color: '#3b82f6', emoji: '🔵', label: 'Completed' },
+                { color: 'var(--g)', emoji: '🟢', label: 'On Track' },
+                { color: 'var(--a)', emoji: '🟡', label: 'At Risk' },
+                { color: 'var(--r)', emoji: '🔴', label: 'Delayed' },
+              ].map(({ color, emoji, label }) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 9, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{label}</span>
+                </div>
+              ))}
+            </div>
             {hiddenCount > 0 && <span style={{ fontSize: 10, color: 'var(--a)', background: 'rgba(249,115,22,.1)', padding: '1px 7px', borderRadius: 8, fontWeight: 700 }}>{hiddenCount} hidden</span>}
             {hiddenCount > 0 && canComment && (
               <button onClick={e => { e.stopPropagation(); setHiddenProjects(new Set()); localStorage.removeItem('execSummaryHidden'); }}
@@ -4521,7 +4566,7 @@
                   <div style={{ padding: '6px 14px 4px', fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                     🔷 CUBES Projects ({cubesProjs.filter(p => !hiddenProjects.has(p.code)).length})
                   </div>
-                  <ProjTable rows={cubesProjs} showExtraCols={true} />
+                  <ProjTable rows={cubesProjs} bufferField="exec_additional_days" />
                 </div>
               )}
               {implProjs.length > 0 && (
@@ -4529,7 +4574,7 @@
                   <div style={{ padding: '6px 14px 4px', fontSize: 11, fontWeight: 800, color: '#f97316', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                     🔶 Implementation Projects ({implProjs.filter(p => !hiddenProjects.has(p.code)).length})
                   </div>
-                  <ProjTable rows={implProjs} />
+                  <ProjTable rows={implProjs} bufferField="exec_additional_days_impl" />
                 </div>
               )}
             </div>
@@ -10940,6 +10985,16 @@
         window.location.reload();
       }
 
+      const [gitPushing, setGitPushing] = useState(false);
+      async function handleGitPush() {
+        setGitPushing(true);
+        try {
+          const r = await api.gitPush(user.id);
+          showToast(r.message || 'Pushed to GitHub ✓', 'success');
+        } catch (e) { showToast('Push failed: ' + e.message, 'error'); }
+        setGitPushing(false);
+      }
+
       function toggleMode() {
         const next = !isLight;
         setIsLight(next);
@@ -11084,6 +11139,13 @@
                 <div className="user-av">{initials}</div>
                 <div><div className="user-nm">{user.name}</div><div className="user-role">{user.role}</div></div>
               </div>
+              {user?.role === 'admin' && (
+                <button onClick={handleGitPush} disabled={gitPushing}
+                  title="Commit & push all code + DB to GitHub"
+                  style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: gitPushing ? 'var(--s2)' : 'var(--brand)', color: gitPushing ? 'var(--muted)' : '#fff', cursor: gitPushing ? 'not-allowed' : 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {gitPushing ? '⏳ Pushing…' : '☁ Push GitHub'}
+                </button>
+              )}
               <button className="logout-btn" onClick={handleLogout} title="Sign out">Sign out</button>
               <button className="mode-btn" onClick={toggleMode} title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}>
                 {isLight ? '🌙' : '☀️'}
