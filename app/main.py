@@ -1514,13 +1514,112 @@ async def save_c2026(request: Request, caller_id: str):
     _require_admin(caller_id)
     body = await request.json()
     import json as _json
+    import datetime as _dt
     from app.database import get_conn
     with get_conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO c2026_plan (id, data) VALUES ('main', ?)",
             (_json.dumps(body),)
         )
+        # Audit log: record every save with full snapshot
+        user_row = conn.execute("SELECT username FROM users WHERE id=?", (caller_id,)).fetchone()
+        username = user_row["username"] if user_row else (caller_id or "unknown")
+        now = _dt.datetime.utcnow().isoformat()
+        conn.execute(
+            "INSERT INTO c2026_audit_log (saved_at, saved_by, snapshot) VALUES (?,?,?)",
+            (now, username, _json.dumps(body))
+        )
+        # Keep only last 50 saves to avoid unbounded growth
+        conn.execute(
+            "DELETE FROM c2026_audit_log WHERE id NOT IN "
+            "(SELECT id FROM c2026_audit_log ORDER BY id DESC LIMIT 50)"
+        )
     return {"status": "ok"}
+
+
+@app.get("/api/c2026/audit-log")
+def get_c2026_audit_log(caller_id: str = ""):
+    """Return last 20 saves with per-row date summary."""
+    import json as _json
+    from app.database import get_conn
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, saved_at, saved_by, snapshot FROM c2026_audit_log ORDER BY id DESC LIMIT 20"
+        ).fetchall()
+
+    def extract_rows(snapshot_json):
+        """Pull every team_row with all tracked fields including depends_on."""
+        try:
+            plan = _json.loads(snapshot_json)
+        except Exception:
+            return {}
+        entries = {}
+        for pi, proj in enumerate(plan.get("projects", [])):
+            for phi, ph in enumerate(proj.get("phases", [])):
+                if ph.get("stages"):
+                    for si, st in enumerate(ph["stages"]):
+                        for row in st.get("team_rows", []):
+                            code = f"P{pi+1}.Ph{phi+1}.St{si+1}.{row.get('team','')}"
+                            deps = [f"{d.get('type','FS')} {d.get('ref','')}" for d in (row.get("depends_on") or [])]
+                            entries[code] = {
+                                "code": code,
+                                "start": row.get("start"),
+                                "end": row.get("end"),
+                                "days": row.get("days"),
+                                "pct": row.get("pct"),
+                                "status": row.get("status"),
+                                "deps": ", ".join(deps) if deps else None,
+                            }
+                else:
+                    for row in ph.get("team_rows", []):
+                        code = f"P{pi+1}.Ph{phi+1}.{row.get('team','')}"
+                        deps = [f"{d.get('type','FS')} {d.get('ref','')}" for d in (row.get("depends_on") or [])]
+                        entries[code] = {
+                            "code": code,
+                            "start": row.get("start"),
+                            "end": row.get("end"),
+                            "days": row.get("days"),
+                            "pct": row.get("pct"),
+                            "status": row.get("status"),
+                            "deps": ", ".join(deps) if deps else None,
+                        }
+        return entries
+
+    TRACKED = ["start", "end", "days", "pct", "status", "deps"]
+
+    # Parse all snapshots into row maps
+    parsed = [(r, extract_rows(r["snapshot"])) for r in rows]
+
+    result = []
+    for idx, (r, current_map) in enumerate(parsed):
+        # Previous save is the next entry (list is newest-first)
+        prev_map = parsed[idx + 1][1] if idx + 1 < len(parsed) else {}
+
+        changes = []
+        all_codes = set(current_map.keys()) | set(prev_map.keys())
+        for code in sorted(all_codes):
+            cur = current_map.get(code, {})
+            prv = prev_map.get(code, {})
+            field_changes = []
+            for field in TRACKED:
+                cv = cur.get(field)
+                pv = prv.get(field)
+                if cv != pv:
+                    field_changes.append({"field": field, "old": pv, "new": cv})
+            if field_changes:
+                changes.append({"code": code, "changes": field_changes})
+
+        # Also include all rows with any data (for the full-state view / filter)
+        all_rows = list(current_map.values())
+
+        result.append({
+            "id": r["id"],
+            "saved_at": r["saved_at"],
+            "saved_by": r["saved_by"],
+            "changes": changes,       # diff vs previous save
+            "rows": all_rows,         # full state (for filter)
+        })
+    return JSONResponse(content=result, headers=_NO_CACHE)
 
 
 # ── Project Comments (Stakeholder Comments & Risks) ──────────────────────────
@@ -1553,6 +1652,74 @@ async def save_project_comment(project_code: str, request: Request, caller_id: s
             (project_code, comment, username, now)
         )
     return JSONResponse(content={"status": "ok"}, headers=_NO_CACHE)
+
+
+# ── Exec Summary Snapshots ────────────────────────────────────────────────────
+
+@app.post("/api/exec-summary/snapshot")
+async def take_exec_summary_snapshot(request: Request, caller_id: str = ""):
+    """Save a weekly snapshot of the current executive summary state."""
+    import datetime as _dt
+    from app.database import get_conn
+    body = await request.json()
+    rows = body.get("rows", [])   # list of snapshot row dicts from the frontend
+    if not rows:
+        raise HTTPException(400, "No rows provided.")
+    with get_conn() as conn:
+        user_row = conn.execute("SELECT username FROM users WHERE id=?", (caller_id,)).fetchone()
+        username = user_row["username"] if user_row else (caller_id or "unknown")
+        snapshot_date = _dt.date.today().isoformat()
+        now = _dt.datetime.utcnow().isoformat()
+        # Delete any existing snapshot for today (allow re-taking)
+        codes = [r["project_code"] for r in rows]
+        team_types = list({r.get("team_type", "cubes") for r in rows})
+        for tt in team_types:
+            conn.execute(
+                "DELETE FROM exec_summary_snapshots WHERE snapshot_date=? AND team_type=?",
+                (snapshot_date, tt)
+            )
+        conn.executemany(
+            """INSERT INTO exec_summary_snapshots
+               (snapshot_date, project_code, project_name, team_type,
+                status, add_buffer, new_end, new_status, new_delay, comment, created_by, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [(snapshot_date,
+              r["project_code"], r.get("project_name", ""),
+              r.get("team_type", "cubes"),
+              r.get("status", ""), r.get("add_buffer"), r.get("new_end"),
+              r.get("new_status", ""), r.get("new_delay", 0),
+              r.get("comment", ""), username, now)
+             for r in rows]
+        )
+    return JSONResponse(content={"status": "ok", "snapshot_date": snapshot_date, "count": len(rows)})
+
+
+@app.get("/api/exec-summary/snapshots")
+def get_exec_summary_snapshots(team_type: str = "cubes", caller_id: str = ""):
+    """Return a list of snapshot dates and the rows for the most recent past snapshot."""
+    from app.database import get_conn
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    with get_conn() as conn:
+        dates = conn.execute(
+            "SELECT DISTINCT snapshot_date FROM exec_summary_snapshots WHERE team_type=? ORDER BY snapshot_date DESC",
+            (team_type,)
+        ).fetchall()
+        date_list = [r["snapshot_date"] for r in dates]
+        # Most recent snapshot that is NOT today (last week's)
+        past_dates = [d for d in date_list if d < today]
+        latest_past = past_dates[0] if past_dates else (date_list[0] if date_list else None)
+        rows = []
+        if latest_past:
+            rows = conn.execute(
+                "SELECT * FROM exec_summary_snapshots WHERE snapshot_date=? AND team_type=? ORDER BY project_name",
+                (latest_past, team_type)
+            ).fetchall()
+    return JSONResponse(content={
+        "dates": date_list,
+        "latest_date": latest_past,
+        "rows": [dict(r) for r in rows]
+    }, headers=_NO_CACHE)
 
 
 # ── Project Progress ──────────────────────────────────────────────────────────

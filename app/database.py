@@ -718,6 +718,41 @@ def init_db() -> None:
         except Exception:
             pass
 
+        # schema v2.12a — c2026_audit_log (save history for CUBES 2026 plan)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS c2026_audit_log (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    saved_at    TEXT NOT NULL,
+                    saved_by    TEXT NOT NULL DEFAULT '',
+                    snapshot    TEXT NOT NULL DEFAULT '{}'
+                )
+            """)
+        except Exception:
+            pass
+
+        # schema v2.12 — exec_summary_snapshots (weekly historical snapshots)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS exec_summary_snapshots (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_date TEXT NOT NULL,
+                    project_code  TEXT NOT NULL,
+                    project_name  TEXT NOT NULL DEFAULT '',
+                    team_type     TEXT NOT NULL DEFAULT 'cubes',
+                    status        TEXT NOT NULL DEFAULT '',
+                    add_buffer    INTEGER,
+                    new_end       TEXT,
+                    new_status    TEXT NOT NULL DEFAULT '',
+                    new_delay     INTEGER NOT NULL DEFAULT 0,
+                    comment       TEXT NOT NULL DEFAULT '',
+                    created_by    TEXT NOT NULL DEFAULT '',
+                    created_at    TEXT NOT NULL DEFAULT ''
+                )
+            """)
+        except Exception:
+            pass
+
         # schema v2.10 — project_progress tracker table
         try:
             conn.execute("""
