@@ -76,6 +76,18 @@
       overflow: hidden
     }
 
+    /* Force LTR for English comment inputs */
+    .ltr-input {
+      direction: ltr !important;
+      text-align: left !important;
+      unicode-bidi: plaintext !important;
+      writing-mode: horizontal-tb !important;
+    }
+    .ltr-input::placeholder {
+      direction: ltr !important;
+      text-align: left !important;
+    }
+
     body {
       background: var(--bg);
       color: var(--text);
@@ -4350,8 +4362,15 @@
       const healthLabel = h => h === 'C' ? '🔵 Completed' : h === 'G' ? '🟢 On Track' : h === 'A' ? '🟡 At Risk' : '🔴 Delayed';
 
       function effectiveHealth(p, newDelayDays, newEndSet) {
-        // 100% plan AND actual → Completed (blue)
-        if (p.progress >= 100) return 'C';
+        // Completed only when progress=100 AND no leaf task is below 100%.
+        // This prevents marking a project Completed when individual tasks/phases are still in progress.
+        if (p.progress >= 100) {
+          const leaves = (p.items || []).filter(t => !t.is_summary && !t.is_milestone && !t.is_project_root);
+          const allLeavesDone = leaves.length === 0 || leaves.every(t => (t.pct || 0) >= 100);
+          if (allLeavesDone) return 'C';
+          // Headline says 100% but some tasks are still below 100% — flag as At Risk
+          return 'A';
+        }
         // If buffer is set and new end passed → still red
         if (newEndSet && newDelayDays > 0) return 'R';
         // If buffer is set and new end is in future → on track (green)
@@ -4544,34 +4563,33 @@
                           ? <span style={{ fontWeight: 800, color: 'var(--r)', fontSize: 12 }}>+{newDelayDays}d</span>
                           : <span style={{ color: 'var(--dim)', fontSize: 11 }}>—</span>}
                       </td>
-                      {/* Comments & Justifications — moved to after New Delay */}
-                      <td dir="ltr" style={{ padding: '5px 10px', minWidth: 200, ...ltrCell }}>
+                      {/* Comments & Justifications */}
+                      <td style={{ padding: '5px 10px', minWidth: 200 }}>
                         {isEditingThis ? (
-                          <div dir="ltr" style={{ display: 'flex', flexDirection: 'column', gap: 4, ...ltrCell }}>
-                            <textarea autoFocus rows={3} dir="ltr" lang="en" spellCheck="true"
-                              style={{ flex: 1, fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5, textAlign: 'left', direction: 'ltr', unicodeBidi: 'isolate' }}
-                              value={commentDraft} onChange={e => setCommentDraft(e.target.value)}
-                              onFocus={e => { e.target.setAttribute('dir', 'ltr'); e.target.style.direction = 'ltr'; }}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <textarea
+                              className="ltr-input"
+                              autoFocus
+                              rows={3}
+                              style={{ width: '100%', fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5, boxSizing: 'border-box' }}
+                              value={commentDraft}
+                              onChange={e => setCommentDraft(e.target.value)}
                               onKeyDown={e => {
-                                if (e.shiftKey && (e.ctrlKey || e.altKey) && !e.key.startsWith('Enter')) { e.preventDefault(); e.target.setAttribute('dir','ltr'); return; }
-                                if (e.key === 'Enter' && !e.altKey) { e.preventDefault(); saveComment(p.code, commentDraft); }
-                                if (e.key === 'Enter' && e.altKey) { setCommentDraft(d => d + '\n'); }
                                 if (e.key === 'Escape') setEditingComment(null);
                               }}
-                              placeholder="Type comment… Alt+Enter for new line, Enter to save" />
+                              placeholder="Type comment here…" />
                             <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                              <span style={{ fontSize: 9, color: 'var(--muted)', alignSelf: 'center', flex: 1 }}>Alt+Enter = new line · Enter = save</span>
                               <button onClick={() => saveComment(p.code, commentDraft)} disabled={savingComment} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>{savingComment ? '…' : '✓ Save'}</button>
                               <button onClick={() => setEditingComment(null)} style={{ padding: '3px 7px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>✕</button>
                             </div>
                           </div>
                         ) : (
-                          <div dir="ltr" style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minHeight: 26, ...ltrCell }}>
-                            <span dir="ltr" style={{ flex: 1, fontSize: 11, color: comment ? 'var(--text)' : 'var(--dim)', fontStyle: comment ? 'normal' : 'italic', whiteSpace: 'pre-wrap', lineHeight: 1.5, textAlign: 'left', direction: 'ltr', unicodeBidi: 'isolate' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minHeight: 26 }}>
+                            <span className="ltr-input" style={{ flex: 1, fontSize: 11, color: comment ? 'var(--text)' : 'var(--dim)', fontStyle: comment ? 'normal' : 'italic', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                               {comment || (canComment ? 'Click ✎ to add comment…' : '—')}
                             </span>
                             {canComment && <span style={{ cursor: 'pointer', opacity: 0.4, fontSize: 11, flexShrink: 0, marginTop: 1 }}
-                              onClick={() => { setCommentDraft(comment); setEditingComment(p.code); }} title="Edit comment (Alt+Enter for new line)">✎</span>}
+                              onClick={() => { setCommentDraft(comment); setEditingComment(p.code); }} title="Edit comment">✎</span>}
                           </div>
                         )}
                       </td>
