@@ -80,12 +80,8 @@
     .ltr-input {
       direction: ltr !important;
       text-align: left !important;
-      unicode-bidi: plaintext !important;
+      unicode-bidi: bidi-override !important;
       writing-mode: horizontal-tb !important;
-    }
-    .ltr-input::placeholder {
-      direction: ltr !important;
-      text-align: left !important;
     }
 
     body {
@@ -4219,6 +4215,10 @@
       const [savingComment, setSavingComment] = useState(false);
       const [editingComment, setEditingComment] = useState(null);
       const [commentDraft, setCommentDraft] = useState('');
+      const [scopeModal, setScopeModal] = useState(null);        // project object or null
+      const [scopeEditMode, setScopeEditMode] = useState(false);
+      const [scopeDraft, setScopeDraft] = useState('');
+      const [savingScope, setSavingScope] = useState(false);
       const [hiddenProjects, setHiddenProjects] = useState(() => {
         try { return new Set(JSON.parse(localStorage.getItem('execSummaryHidden') || '[]')); } catch { return new Set(); }
       });
@@ -4455,7 +4455,14 @@
                   const tdExtra = { padding: '6px 10px', background: 'rgba(245,158,11,.03)', borderLeft: '1px solid rgba(245,158,11,.15)' };
                   return (
                     <tr key={p.code} style={{ borderBottom: '1px solid var(--border)', opacity: isCompleted ? 0.85 : 1, background: isCompleted ? 'rgba(59,130,246,.04)' : undefined }}>
-                      <td style={{ padding: '8px 10px', fontWeight: 600, borderLeft: `3px solid ${hc}`, minWidth: 220 }}>{p.name}</td>
+                      <td style={{ padding: '8px 10px', fontWeight: 600, borderLeft: `3px solid ${hc}`, minWidth: 220 }}>
+                        <span
+                          title="Click to view project scope / deliverables"
+                          style={{ cursor: 'pointer', borderBottom: '1px dashed var(--brand)', paddingBottom: 1 }}
+                          onClick={() => { setScopeModal(p); setScopeEditMode(false); setScopeDraft(p.scope || ''); }}>
+                          {p.name}
+                        </span>
+                      </td>
                       <td style={{ padding: '6px 10px', fontSize: 11 }}>
                         {editingRB === p.code ? (
                           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -4569,9 +4576,10 @@
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             <textarea
                               className="ltr-input"
+                              dir="ltr"
                               autoFocus
                               rows={3}
-                              style={{ width: '100%', fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5, boxSizing: 'border-box' }}
+                              style={{ width: '100%', fontSize: 11, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--brand)', background: 'var(--s1)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 52, fontFamily: 'inherit', lineHeight: 1.5, boxSizing: 'border-box', direction: 'ltr', textAlign: 'left', unicodeBidi: 'bidi-override' }}
                               value={commentDraft}
                               onChange={e => setCommentDraft(e.target.value)}
                               onKeyDown={e => {
@@ -4688,6 +4696,135 @@
             </div>
           )}
         </div>
+
+        {/* ── Project Scope Modal ─────────────────────────────────── */}
+        {scopeModal && (() => {
+          const sp = scopeModal;
+          const isVC = sp.code === 'CUBE515D';
+
+          function renderVCScope(text) {
+            if (!text) return null;
+            const lines = text.split('\n');
+            const groups = [];
+            let current = null;
+            lines.forEach(raw => {
+              const line = raw.trim();
+              if (!line) return;
+              if (line.startsWith('GROUP ')) {
+                current = { title: line, stories: [] };
+                groups.push(current);
+              } else if (line.startsWith('US-') && current) {
+                const [id, ...rest] = line.split(' | ');
+                current.stories.push({ id: id.trim(), title: rest.join(' | ').trim(), desc: '' });
+              } else if (line.startsWith('As a') && current && current.stories.length) {
+                current.stories[current.stories.length - 1].desc = line;
+              }
+            });
+
+            if (groups.length === 0) return <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7 }}>{text}</pre>;
+
+            return (
+              <div>
+                {groups.map((g, gi) => (
+                  <div key={gi} style={{ marginBottom: 18 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '.07em', padding: '6px 0 4px', borderBottom: '2px solid var(--border2)', marginBottom: 8 }}>
+                      {g.title}
+                    </div>
+                    {g.stories.map((s, si) => (
+                      <div key={si} style={{ display: 'flex', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ flexShrink: 0, minWidth: 50, fontWeight: 700, fontSize: 11, color: 'var(--brand)', paddingTop: 1 }}>{s.id}</div>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{s.title}</div>
+                          {s.desc && <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5, fontStyle: 'italic' }}>{s.desc}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            );
+          }
+
+          async function saveScope() {
+            setSavingScope(true);
+            try {
+              await fetch(`/api/projects/${sp.code}/scope?caller_id=${encodeURIComponent(user?.id || '')}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: scopeDraft }),
+                credentials: 'same-origin',
+              }).then(r => { if (!r.ok) throw new Error(r.statusText); });
+              sp.scope = scopeDraft;
+              setScopeEditMode(false);
+            } catch (e) {
+              alert('Failed to save scope: ' + e.message);
+            }
+            setSavingScope(false);
+          }
+
+          return (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+              onClick={e => { if (e.target === e.currentTarget) setScopeModal(null); }}>
+              <div style={{ background: 'var(--s1)', border: '1px solid var(--border2)', borderRadius: 14, width: '92vw', maxWidth: 860, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,.35)' }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)', gap: 10, flexShrink: 0, background: 'var(--s2)' }}>
+                  <span style={{ fontSize: 18 }}>📋</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>{sp.name}</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>Project Scope & Deliverables</div>
+                  </div>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {isAdmin && !scopeEditMode && (
+                      <button onClick={() => setScopeEditMode(true)}
+                        style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--brand)', background: 'transparent', color: 'var(--brand)', cursor: 'pointer', fontWeight: 600 }}>
+                        ✎ Edit
+                      </button>
+                    )}
+                    {scopeEditMode && (
+                      <>
+                        <button onClick={saveScope} disabled={savingScope}
+                          style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+                          {savingScope ? '…' : '✓ Save'}
+                        </button>
+                        <button onClick={() => { setScopeEditMode(false); setScopeDraft(sp.scope || ''); }}
+                          style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', cursor: 'pointer' }}>
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                    <button onClick={() => setScopeModal(null)}
+                      style={{ fontSize: 11, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--s1)', color: 'var(--muted)', cursor: 'pointer' }}>
+                      ✕ Close
+                    </button>
+                  </div>
+                </div>
+                {/* Body */}
+                <div style={{ overflowY: 'auto', padding: '18px 22px', flex: 1 }}>
+                  {scopeEditMode ? (
+                    <textarea
+                      dir="ltr"
+                      className="ltr-input"
+                      rows={20}
+                      style={{ width: '100%', fontSize: 12, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border2)', background: 'var(--s2)', color: 'var(--text)', outline: 'none', resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.6, boxSizing: 'border-box', direction: 'ltr', unicodeBidi: 'bidi-override' }}
+                      value={scopeDraft}
+                      onChange={e => setScopeDraft(e.target.value)}
+                      placeholder="Enter project scope, objectives, and deliverables…" />
+                  ) : sp.scope ? (
+                    isVC ? renderVCScope(sp.scope) : <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.7, color: 'var(--text)', fontFamily: 'inherit', margin: 0 }}>{sp.scope}</pre>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)' }}>
+                      <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No scope defined yet</div>
+                      <div style={{ fontSize: 12 }}>
+                        {isAdmin ? <span>Click <strong>✎ Edit</strong> to add the project scope and deliverables.</span> : 'No scope has been entered for this project.'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Snapshot Modal ─────────────────────────────────────────── */}
         {snapshotModal && (

@@ -478,6 +478,12 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass
 
+        # schema v2.1 — project scope / deliverables text
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN scope TEXT")
+        except sqlite3.OperationalError:
+            pass
+
         # Seed default dashboard settings if missing
         row = conn.execute("SELECT id FROM dashboard_settings WHERE id='global'").fetchone()
         if not row:

@@ -214,6 +214,7 @@ def portfolio(username: str = "user"):
                 "requested_by":          p["requested_by"] if "requested_by" in p.keys() else None,
                 "exec_additional_days":      p["exec_additional_days"] if "exec_additional_days" in p.keys() else None,
                 "exec_additional_days_impl": p["exec_additional_days_impl"] if "exec_additional_days_impl" in p.keys() else None,
+                "scope":            p["scope"] if "scope" in p.keys() else None,
                 "items":            items,
             })
 
@@ -647,6 +648,21 @@ def update_project_exec_summary(code: str, req: ProjectExecSummaryUpdate, caller
         if updates:
             cols = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE projects SET {cols} WHERE code=?", list(updates.values()) + [code])
+    return {"status": "ok"}
+
+
+class ProjectScopeUpdate(BaseModel):
+    scope: Optional[str] = None
+
+@app.put("/api/projects/{code}/scope")
+def update_project_scope(code: str, req: ProjectScopeUpdate, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        p = conn.execute("SELECT code FROM projects WHERE code=?", (code,)).fetchone()
+        if not p:
+            raise HTTPException(404, "Project not found.")
+        conn.execute("UPDATE projects SET scope=? WHERE code=?", (req.scope, code))
     return {"status": "ok"}
 
 
