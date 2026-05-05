@@ -11629,13 +11629,38 @@
               [{ align: [] }],
               ['blockquote', 'code-block'],
               ['link'],
-              [{ table: true }],
               ['clean'],
             ],
+            // disable Quill's own clipboard matcher so we can handle paste ourselves
+            clipboard: { matchVisual: false },
           },
         });
         if (initialHtml) q.root.innerHTML = initialHtml;
         quillRef.current = q;
+
+        // Intercept paste — use raw clipboard HTML (preserves Word/Outlook tables)
+        q.root.addEventListener('paste', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const html = e.clipboardData && e.clipboardData.getData('text/html');
+          const text = e.clipboardData && e.clipboardData.getData('text/plain');
+          if (html) {
+            // Strip Word/Outlook namespace noise but keep table structure
+            const clean = html
+              .replace(/<\?xml[^>]*>/gi, '')
+              .replace(/<!--\[if[^\]]*\]>[\s\S]*?<!\[endif\]-->/gi, '')
+              .replace(/<o:p[^>]*>[\s\S]*?<\/o:p>/gi, '')
+              .replace(/\s*mso-[^;"]+;?/gi, '')
+              .replace(/\s*class="[^"]*"/gi, '')
+              .replace(/\s*style=""/gi, '');
+            const sel = q.getSelection(true);
+            q.clipboard.dangerouslyPasteHTML(sel ? sel.index : q.getLength(), clean);
+          } else if (text) {
+            const sel = q.getSelection(true);
+            q.insertText(sel ? sel.index : q.getLength(), text);
+          }
+        }, true);
+
         return () => {};
       }, []);
 
