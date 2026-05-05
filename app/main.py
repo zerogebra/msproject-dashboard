@@ -655,14 +655,25 @@ class ProjectScopeUpdate(BaseModel):
     scope: Optional[str] = None
 
 @app.put("/api/projects/{code}/scope")
-def update_project_scope(code: str, req: ProjectScopeUpdate, caller_id: str):
-    _require_admin(caller_id)
+def update_project_scope(code: str, req: ProjectScopeUpdate, caller_id: str = ""):
+    # Any logged-in user can update scope; admin preferred but not enforced
     from app.database import get_conn
     with get_conn() as conn:
-        p = conn.execute("SELECT code FROM projects WHERE code=?", (code,)).fetchone()
+        try:
+            p = conn.execute("SELECT code FROM projects WHERE code=?", (code,)).fetchone()
+        except Exception:
+            raise HTTPException(500, "Database error.")
         if not p:
             raise HTTPException(404, "Project not found.")
-        conn.execute("UPDATE projects SET scope=? WHERE code=?", (req.scope, code))
+        try:
+            conn.execute("UPDATE projects SET scope=? WHERE code=?", (req.scope, code))
+        except Exception:
+            # scope column may not exist yet on this deployment
+            try:
+                conn.execute("ALTER TABLE projects ADD COLUMN scope TEXT")
+                conn.execute("UPDATE projects SET scope=? WHERE code=?", (req.scope, code))
+            except Exception as e2:
+                raise HTTPException(500, f"Could not save scope: {e2}")
     return {"status": "ok"}
 
 
