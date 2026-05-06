@@ -19,7 +19,8 @@ def get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")   # concurrent reads + writes
+    conn.execute("PRAGMA journal_mode=WAL")      # concurrent reads + writes
+    conn.execute("PRAGMA wal_autocheckpoint=50") # checkpoint every ~200KB (default is 1000 pages ~4MB)
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
@@ -517,6 +518,14 @@ def _seed_vc_scope(conn) -> None:
 
 def init_db() -> None:
     """Create schema and migrate from legacy JSON files (runs once)."""
+    # Flush any uncommitted WAL data to the main DB file on every startup.
+    # This prevents data loss when the WAL grows large between restarts.
+    try:
+        with get_conn() as _wc:
+            _wc.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        pass
+
     with get_conn() as conn:
         conn.executescript(_SCHEMA)
         _migrate_users(conn)
