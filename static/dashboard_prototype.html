@@ -7540,7 +7540,7 @@
     }
 
     // ── PROJECT EXTENSION MODAL ──────────────────────────────────────
-    // ── Project Progress Modal ─────────────────────────────────────────────────
+    // ── Project Progress — Full-screen board ───────────────────────────────────
     function ProjectProgress({ user, projects: liveProjects, onClose }) {
       const [rows, setRows] = useState([]);
       const [loading, setLoading] = useState(true);
@@ -7551,14 +7551,19 @@
 
       useEffect(() => {
         fetch(`/api/project-progress?caller_id=${user?.id || ''}`)
-          .then(r => r.json()).then(d => { setRows(d); setLoading(false); })
+          .then(r => r.json())
+          .then(d => {
+            // active rows first (by sort_order), completed rows last
+            const sorted = [...d].sort((a,b) => {
+              if (!!a.is_completed !== !!b.is_completed) return a.is_completed ? 1 : -1;
+              return (a.sort_order||0) - (b.sort_order||0);
+            });
+            setRows(sorted); setLoading(false);
+          })
           .catch(() => setLoading(false));
       }, []);
 
-      function startEdit(row) {
-        setEditId(row.id);
-        setEditData({ ...row });
-      }
+      function startEdit(row) { setEditId(row.id); setEditData({ ...row }); }
 
       async function saveEdit() {
         setSaving(true);
@@ -7581,7 +7586,9 @@
         });
         const d = await r.json();
         const newRow = { id: d.id, project_name: 'New Project', project_code: '', status: '',
-          ba: '', uiux: '', qc: '', c_classic: '', fe: '', be: '', due_date: '', start_date: '', end_date: '', sort_order: rows.length + 1 };
+          ba: '', uiux: '', qc: '', c_classic: '', fe: '', be: '',
+          due_date: '', start_date: '', end_date: '', sort_order: rows.length + 1,
+          pct: 0, is_completed: 0 };
         setRows([...rows, newRow]);
         startEdit(newRow);
       }
@@ -7592,33 +7599,49 @@
         setRows(rows.filter(r => r.id !== id));
       }
 
-      // Try auto-populate from live project data
-      function autoFill(row) {
+      // Mark complete: set is_completed=1, push to end by setting sort_order = max+1
+      async function markComplete(row) {
+        const maxOrder = Math.max(0, ...rows.map(r => r.sort_order || 0));
+        const update = { is_completed: row.is_completed ? 0 : 1, sort_order: row.is_completed ? (maxOrder+1) : (maxOrder+1) };
+        // if un-completing, give it a middle sort_order
+        const newCompleted = row.is_completed ? 0 : 1;
+        const newOrder = newCompleted ? maxOrder + 1 : Math.min(...rows.filter(r=>!r.is_completed).map(r=>r.sort_order||0)) - 1;
+        const payload = { is_completed: newCompleted, sort_order: newOrder };
+        await fetch(`/api/project-progress/${row.id}?caller_id=${user?.id || ''}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        setRows(prev => {
+          const updated = prev.map(r => r.id === row.id ? { ...r, ...payload } : r);
+          return [...updated].sort((a,b) => {
+            if (!!a.is_completed !== !!b.is_completed) return a.is_completed ? 1 : -1;
+            return (a.sort_order||0) - (b.sort_order||0);
+          });
+        });
+      }
+
+      function autoFill() {
         const code = (editData.project_code || '').trim().toUpperCase();
         if (!code) return;
-        const match = (liveProjects || []).find(p => (p.code || '').toUpperCase() === code || (p.name || '').toUpperCase().includes(code));
+        const match = (liveProjects || []).find(p => (p.code||'').toUpperCase()===code || (p.name||'').toUpperCase().includes(code));
         if (!match) { alert(`No project found with code "${code}"`); return; }
-        setEditData(ed => ({
-          ...ed,
-          project_name: match.name || ed.project_name,
-          start_date: match.start || ed.start_date,
-          end_date: match.end || ed.end_date,
-        }));
+        setEditData(ed => ({ ...ed, project_name: match.name||ed.project_name, start_date: match.start||ed.start_date, end_date: match.end||ed.end_date }));
       }
 
       const COLS = [
-        { key: 'project_name', label: 'Project', wide: true },
-        { key: 'project_code', label: 'Code' },
-        { key: 'status',       label: 'Status',  wide: true },
-        { key: 'ba',           label: 'BA' },
-        { key: 'uiux',         label: 'UI/UX' },
-        { key: 'qc',           label: 'QC' },
-        { key: 'c_classic',    label: 'C-Classic' },
-        { key: 'fe',           label: 'FE' },
-        { key: 'be',           label: 'BE' },
-        { key: 'due_date',     label: 'Due Date', isDate: true },
-        { key: 'start_date',   label: 'Start',    isDate: true },
-        { key: 'end_date',     label: 'End',      isDate: true },
+        { key: 'project_name', label: 'Project',    minW: 180 },
+        { key: 'project_code', label: 'Code',        minW: 70  },
+        { key: 'status',       label: 'Status',      minW: 150 },
+        { key: 'pct',          label: '%',            minW: 110, isPct: true },
+        { key: 'ba',           label: 'BA',           minW: 60  },
+        { key: 'uiux',         label: 'UI/UX',        minW: 60  },
+        { key: 'qc',           label: 'QC',           minW: 60  },
+        { key: 'c_classic',    label: 'C-Classic',    minW: 80  },
+        { key: 'fe',           label: 'FE',           minW: 60  },
+        { key: 'be',           label: 'BE',           minW: 60  },
+        { key: 'due_date',     label: 'Due Date',     minW: 95, isDate: true },
+        { key: 'start_date',   label: 'Start',        minW: 90, isDate: true },
+        { key: 'end_date',     label: 'End',          minW: 90, isDate: true },
       ];
 
       function fmtD(s) {
@@ -7627,99 +7650,167 @@
         catch { return s; }
       }
 
+      function PctBar({ val }) {
+        const v = Math.min(100, Math.max(0, parseInt(val)||0));
+        const color = v>=100 ? '#16a34a' : v>=70 ? '#0891b2' : v>=40 ? '#f59e0b' : '#ef4444';
+        return (
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ flex:1, height:8, background:'var(--border2,#e5e7eb)', borderRadius:4, overflow:'hidden', minWidth:55 }}>
+              <div style={{ width:`${v}%`, height:'100%', background:color, borderRadius:4, transition:'width .3s' }} />
+            </div>
+            <span style={{ fontSize:11, fontWeight:700, color, minWidth:30, textAlign:'right' }}>{v}%</span>
+          </div>
+        );
+      }
+
+      const active    = rows.filter(r => !r.is_completed);
+      const completed = rows.filter(r => r.is_completed);
+
       return (
-        <div style={{ position:'fixed', inset:0, zIndex:2000, background:'rgba(0,0,0,.45)', display:'flex', alignItems:'flex-start', justifyContent:'center', paddingTop:60, overflowY:'auto' }}>
-          <div style={{ background:'var(--s1)', border:'1px solid var(--border)', borderRadius:16, width:'98vw', maxWidth:1360, minHeight:400, boxShadow:'0 16px 64px rgba(0,0,0,.35)', padding:0, overflow:'hidden', marginBottom:40 }}>
-            {/* Header */}
-            <div style={{ background:'linear-gradient(135deg,rgba(6,182,212,.12),rgba(14,165,233,.06))', borderBottom:'1px solid rgba(6,182,212,.25)', padding:'16px 24px', display:'flex', alignItems:'center', gap:12 }}>
-              <span style={{ fontSize:22 }}>📊</span>
-              <div style={{ flex:1 }}>
-                <div style={{ fontWeight:800, fontSize:16, color:'var(--fg)' }}>Project Progress</div>
-                <div style={{ fontSize:11, color:'var(--muted)', marginTop:1 }}>Live status board — manual updates + auto-linked from project data</div>
+        <div style={{ position:'fixed', inset:0, zIndex:2000, background:'var(--s1)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          {/* ── Header ── */}
+          <div style={{ background:'linear-gradient(135deg,rgba(6,182,212,.15),rgba(14,165,233,.08))', borderBottom:'2px solid rgba(6,182,212,.3)', padding:'14px 24px', display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+            <span style={{ fontSize:24 }}>📊</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:800, fontSize:17, color:'var(--fg)' }}>Project Progress</div>
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:1 }}>
+                {active.length} active &nbsp;·&nbsp; {completed.length} completed
               </div>
-              {canEdit && (
-                <button onClick={addRow} style={{ background:'rgba(6,182,212,.12)', border:'1px solid rgba(6,182,212,.35)', borderRadius:8, padding:'6px 16px', cursor:'pointer', color:'#0891b2', fontWeight:700, fontSize:12 }}>+ Add Row</button>
-              )}
-              <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', fontSize:22, color:'var(--muted)', lineHeight:1, padding:4 }}>×</button>
             </div>
+            {canEdit && (
+              <button onClick={addRow}
+                style={{ background:'rgba(6,182,212,.15)', border:'1px solid rgba(6,182,212,.4)', borderRadius:8, padding:'7px 18px', cursor:'pointer', color:'#0891b2', fontWeight:700, fontSize:12 }}>
+                + Add Row
+              </button>
+            )}
+            <button onClick={onClose}
+              style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.25)', borderRadius:8, padding:'7px 14px', cursor:'pointer', color:'#ef4444', fontWeight:700, fontSize:13 }}>
+              ✕ Close
+            </button>
+          </div>
 
-            {/* Table */}
-            <div style={{ overflowX:'auto', padding:'16px 12px' }}>
-              {loading ? <div style={{ padding:40, textAlign:'center', color:'var(--muted)' }}>Loading…</div> : (
-                <table style={{ borderCollapse:'collapse', width:'100%', minWidth:1100, fontSize:12 }}>
-                  <thead>
-                    <tr style={{ background:'var(--s2)', borderBottom:'2px solid var(--border)' }}>
-                      {COLS.map(c => (
-                        <th key={c.key} style={{ padding:'8px 10px', textAlign:'left', whiteSpace:'nowrap', color:'var(--muted)', fontWeight:700, fontSize:11, minWidth: c.wide ? 160 : c.isDate ? 95 : 70 }}>
-                          {c.label}
-                        </th>
-                      ))}
-                      {canEdit && <th style={{ width:80 }} />}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, ri) => {
-                      const isEditing = editId === row.id;
-                      const base = isEditing ? editData : row;
-                      return (
-                        <tr key={row.id} style={{ borderBottom:'1px solid var(--border)', background: ri%2===0 ? 'transparent' : 'rgba(0,0,0,.018)', transition:'background .15s' }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(6,182,212,.04)'}
-                          onMouseLeave={e => e.currentTarget.style.background = ri%2===0 ? 'transparent' : 'rgba(0,0,0,.018)'}>
-                          {COLS.map(c => (
-                            <td key={c.key} style={{ padding:'6px 10px', verticalAlign:'top' }}>
-                              {isEditing ? (
-                                <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-                                  <input
-                                    type={c.isDate ? 'date' : 'text'}
-                                    value={editData[c.key] || ''}
-                                    onChange={e => setEditData(ed => ({ ...ed, [c.key]: e.target.value }))}
-                                    style={{ width:'100%', background:'var(--s2)', border:'1px solid rgba(6,182,212,.4)', borderRadius:4, padding:'3px 6px', color:'var(--fg)', fontSize:11 }}
-                                  />
-                                  {c.key === 'project_code' && (
-                                    <button onClick={() => autoFill(row)} title="Auto-fill from project" style={{ background:'rgba(6,182,212,.12)', border:'none', borderRadius:4, padding:'3px 6px', cursor:'pointer', color:'#0891b2', fontSize:10, whiteSpace:'nowrap' }}>↓ Fill</button>
-                                  )}
-                                </div>
-                              ) : (
-                                <span style={{ color: c.key==='project_name' ? 'var(--fg)' : c.key==='status' ? 'var(--fg)' : 'var(--muted)',
-                                               fontWeight: c.key==='project_name' ? 700 : 400,
-                                               fontSize: c.isDate ? 11 : 12,
-                                               whiteSpace: c.key==='status' ? 'normal' : 'nowrap' }}>
-                                  {c.isDate ? fmtD(base[c.key]) : (base[c.key] || '—')}
-                                </span>
+          {/* ── Table body ── */}
+          <div style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+            {loading ? (
+              <div style={{ padding:60, textAlign:'center', color:'var(--muted)', fontSize:14 }}>Loading…</div>
+            ) : (
+              <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
+                <thead style={{ position:'sticky', top:0, zIndex:10 }}>
+                  <tr style={{ background:'var(--s2)', borderBottom:'2px solid var(--border)' }}>
+                    {COLS.map(c => (
+                      <th key={c.key} style={{ padding:'9px 10px', textAlign:'left', whiteSpace:'nowrap', color:'var(--muted)', fontWeight:700, fontSize:11, minWidth:c.minW }}>
+                        {c.label}
+                      </th>
+                    ))}
+                    <th style={{ padding:'9px 10px', minWidth:canEdit ? 120 : 80, textAlign:'center', color:'var(--muted)', fontWeight:700, fontSize:11 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, ri) => {
+                    const isEditing  = editId === row.id;
+                    const isDone     = !!row.is_completed;
+                    const base       = isEditing ? editData : row;
+                    const rowBg      = isDone
+                      ? 'rgba(22,163,74,.06)'
+                      : ri%2===0 ? 'transparent' : 'rgba(0,0,0,.018)';
+                    return (
+                      <tr key={row.id}
+                        style={{ borderBottom:'1px solid var(--border)', background:rowBg, opacity: isDone ? 0.72 : 1, transition:'background .15s' }}
+                        onMouseEnter={e => { if (!isDone) e.currentTarget.style.background = 'rgba(6,182,212,.05)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = rowBg; }}>
+
+                        {COLS.map(c => (
+                          <td key={c.key} style={{ padding:'7px 10px', verticalAlign:'middle' }}>
+                            {isEditing ? (
+                              <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+                                <input
+                                  type={c.isDate ? 'date' : c.isPct ? 'number' : 'text'}
+                                  min={c.isPct ? 0 : undefined}
+                                  max={c.isPct ? 100 : undefined}
+                                  value={editData[c.key] ?? ''}
+                                  onChange={e => setEditData(ed => ({ ...ed, [c.key]: c.isPct ? parseInt(e.target.value)||0 : e.target.value }))}
+                                  style={{ width:'100%', background:'var(--s2)', border:'1px solid rgba(6,182,212,.4)', borderRadius:4, padding:'3px 6px', color:'var(--fg)', fontSize:11 }}
+                                />
+                                {c.key === 'project_code' && (
+                                  <button onClick={autoFill} title="Auto-fill" style={{ background:'rgba(6,182,212,.12)', border:'none', borderRadius:4, padding:'3px 6px', cursor:'pointer', color:'#0891b2', fontSize:10, whiteSpace:'nowrap' }}>↓ Fill</button>
+                                )}
+                              </div>
+                            ) : c.isPct ? (
+                              <PctBar val={base.pct} />
+                            ) : (
+                              <span style={{
+                                color: c.key==='project_name' ? (isDone ? 'var(--muted)' : 'var(--fg)') : 'var(--muted)',
+                                fontWeight: c.key==='project_name' ? 700 : 400,
+                                fontSize: c.isDate ? 11 : 12,
+                                whiteSpace: c.key==='status' ? 'normal' : 'nowrap',
+                                textDecoration: isDone && c.key==='project_name' ? 'line-through' : 'none',
+                              }}>
+                                {c.isDate ? fmtD(base[c.key]) : (base[c.key] || '—')}
+                              </span>
+                            )}
+                          </td>
+                        ))}
+
+                        {/* Actions cell */}
+                        <td style={{ padding:'6px 10px', whiteSpace:'nowrap', textAlign:'center' }}>
+                          {isEditing ? (
+                            <div style={{ display:'flex', gap:4, justifyContent:'center' }}>
+                              <button onClick={saveEdit} disabled={saving}
+                                style={{ background:'rgba(34,197,94,.12)', border:'1px solid rgba(34,197,94,.3)', borderRadius:5, padding:'4px 12px', cursor:'pointer', color:'#16a34a', fontWeight:700, fontSize:11 }}>
+                                {saving ? '…' : '✓ Save'}
+                              </button>
+                              <button onClick={() => setEditId(null)}
+                                style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.2)', borderRadius:5, padding:'4px 8px', cursor:'pointer', color:'#ef4444', fontSize:11 }}>
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display:'flex', gap:4, justifyContent:'center', alignItems:'center' }}>
+                              {/* Complete / Undo badge */}
+                              <button onClick={() => markComplete(row)}
+                                title={isDone ? 'Mark as active' : 'Mark as completed'}
+                                style={{
+                                  background: isDone ? 'rgba(22,163,74,.15)' : 'rgba(22,163,74,.08)',
+                                  border: `1px solid ${isDone ? 'rgba(22,163,74,.5)' : 'rgba(22,163,74,.25)'}`,
+                                  borderRadius:6, padding:'3px 9px', cursor:'pointer',
+                                  color: '#16a34a', fontWeight:700, fontSize:10, whiteSpace:'nowrap'
+                                }}>
+                                {isDone ? '↩ Active' : '✔ Done'}
+                              </button>
+                              {canEdit && !isDone && (
+                                <button onClick={() => startEdit(row)}
+                                  style={{ background:'rgba(99,102,241,.1)', border:'1px solid rgba(99,102,241,.25)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'var(--brand)', fontSize:11 }}>
+                                  ✎
+                                </button>
                               )}
-                            </td>
-                          ))}
-                          {canEdit && (
-                            <td style={{ padding:'6px 8px', whiteSpace:'nowrap' }}>
-                              {isEditing ? (
-                                <div style={{ display:'flex', gap:4 }}>
-                                  <button onClick={saveEdit} disabled={saving} style={{ background:'rgba(34,197,94,.12)', border:'1px solid rgba(34,197,94,.3)', borderRadius:5, padding:'3px 10px', cursor:'pointer', color:'#16a34a', fontWeight:700, fontSize:11 }}>{saving ? '…' : '✓'}</button>
-                                  <button onClick={() => setEditId(null)} style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.2)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'#ef4444', fontWeight:700, fontSize:11 }}>×</button>
-                                </div>
-                              ) : (
-                                <div style={{ display:'flex', gap:4 }}>
-                                  <button onClick={() => startEdit(row)} style={{ background:'rgba(99,102,241,.1)', border:'1px solid rgba(99,102,241,.25)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'var(--brand)', fontSize:11 }}>✎</button>
-                                  {user?.role === 'admin' && (
-                                    <button onClick={() => deleteRow(row.id)} style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.2)', borderRadius:5, padding:'3px 8px', cursor:'pointer', color:'#ef4444', fontSize:11 }}>🗑</button>
-                                  )}
-                                </div>
+                              {user?.role === 'admin' && (
+                                <button onClick={() => deleteRow(row.id)}
+                                  style={{ background:'rgba(239,68,68,.07)', border:'1px solid rgba(239,68,68,.18)', borderRadius:5, padding:'3px 7px', cursor:'pointer', color:'#ef4444', fontSize:11 }}>
+                                  🗑
+                                </button>
                               )}
-                            </td>
+                            </div>
                           )}
-                        </tr>
-                      );
-                    })}
-                    {rows.length === 0 && (
-                      <tr><td colSpan={COLS.length + 1} style={{ padding:32, textAlign:'center', color:'var(--muted)' }}>No projects added yet.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {rows.length === 0 && (
+                    <tr><td colSpan={COLS.length+1} style={{ padding:48, textAlign:'center', color:'var(--muted)', fontSize:13 }}>No projects added yet. Click <strong>+ Add Row</strong> to start.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
 
-            {/* Footer note */}
-            <div style={{ borderTop:'1px solid var(--border)', padding:'10px 24px', background:'rgba(6,182,212,.03)', display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ fontSize:10, color:'var(--muted)' }}>💡 Editors can update all rows. Use <strong>project_code</strong> to auto-link data from an existing project. Admins can add/delete rows.</span>
+          {/* ── Footer ── */}
+          <div style={{ borderTop:'1px solid var(--border)', padding:'8px 24px', background:'rgba(6,182,212,.03)', flexShrink:0, display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:10, color:'var(--muted)' }}>
+              💡 Use <strong>% column</strong> to track completion. Click <strong>✔ Done</strong> to mark complete and move to bottom. Editors can update rows. Admins can add/delete rows.
+            </span>
+            <div style={{ marginLeft:'auto', display:'flex', gap:16, fontSize:11, color:'var(--muted)' }}>
+              <span>🟢 Active: <strong style={{ color:'var(--fg)' }}>{active.length}</strong></span>
+              <span>✅ Completed: <strong style={{ color:'#16a34a' }}>{completed.length}</strong></span>
             </div>
           </div>
         </div>

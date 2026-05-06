@@ -886,6 +886,16 @@ def init_db() -> None:
             pass
         _seed_project_progress(conn)
 
+        # schema v2.11 — pct + is_completed on project_progress
+        for stmt in [
+            "ALTER TABLE project_progress ADD COLUMN pct INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE project_progress ADD COLUMN is_completed INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+
         # data migration: ensure all projects with a cr_id are flagged as lightweight
         # (older rows may have is_lightweight=0 if seeded before schema v1.8)
         try:

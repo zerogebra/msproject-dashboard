@@ -1764,7 +1764,7 @@ def get_project_progress(caller_id: str = ""):
 @app.put("/api/project-progress/{row_id}")
 async def update_project_progress(row_id: str, request: Request, caller_id: str = ""):
     body = await request.json()
-    allowed_fields = {"project_name","project_code","status","ba","uiux","qc","c_classic","fe","be","due_date","start_date","end_date","sort_order"}
+    allowed_fields = {"project_name","project_code","status","ba","uiux","qc","c_classic","fe","be","due_date","start_date","end_date","sort_order","pct","is_completed"}
     updates = {k: v for k, v in body.items() if k in allowed_fields}
     if not updates:
         raise HTTPException(400, "No valid fields")
@@ -1786,13 +1786,13 @@ async def add_project_progress(request: Request, caller_id: str = ""):
     with get_conn() as conn:
         max_order = conn.execute("SELECT MAX(sort_order) FROM project_progress").fetchone()[0] or 0
         conn.execute(
-            "INSERT INTO project_progress (id,project_name,project_code,status,ba,uiux,qc,c_classic,fe,be,due_date,start_date,end_date,sort_order) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO project_progress (id,project_name,project_code,status,ba,uiux,qc,c_classic,fe,be,due_date,start_date,end_date,sort_order,pct,is_completed) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (new_id, body.get("project_name","New Project"), body.get("project_code",""),
              body.get("status",""), body.get("ba",""), body.get("uiux",""), body.get("qc",""),
              body.get("c_classic",""), body.get("fe",""), body.get("be",""),
              body.get("due_date",""), body.get("start_date",""), body.get("end_date",""),
-             max_order + 1)
+             max_order + 1, 0, 0)
         )
     return {"id": new_id}
 
