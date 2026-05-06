@@ -11,9 +11,8 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Quill rich-text editor -->
-  <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
-  <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+  <!-- CKEditor 5 — handles Word/Outlook paste with full table support -->
+  <script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
 
   <style>
     /* ── DARK ──────────────────────────────────────────────────── */
@@ -88,17 +87,13 @@
       writing-mode: horizontal-tb !important;
     }
 
-    /* Quill editor theme overrides for dark mode */
-    .ql-toolbar { border-radius: 8px 8px 0 0; background: var(--s2,#f8f9fa); border-color: var(--border2,#d1d5db) !important; }
-    .ql-container { border-radius: 0 0 8px 8px; border-color: var(--border2,#d1d5db) !important; background: var(--s1,#fff); font-size: 13px; min-height: 260px; }
-    .html.dark .ql-toolbar { background: #1e2130; border-color: #374151 !important; }
-    .html.dark .ql-container { background: #161b2e; border-color: #374151 !important; color: #e2e8f0; }
-    .html.dark .ql-editor { color: #e2e8f0; }
-    .html.dark .ql-stroke { stroke: #9ca3af !important; }
-    .html.dark .ql-fill  { fill:   #9ca3af !important; }
-    .html.dark .ql-picker-label { color: #9ca3af !important; }
-    .html.dark .ql-picker-options { background: #1e2130 !important; border-color: #374151 !important; }
-    .ql-editor { min-height: 240px; line-height: 1.7; }
+    /* CKEditor 5 overrides */
+    .ck-editor__editable { min-height: 280px; font-size: 13px; line-height: 1.7; }
+    .ck.ck-editor__main>.ck-editor__editable { border-radius: 0 0 8px 8px !important; }
+    .ck.ck-toolbar { border-radius: 8px 8px 0 0 !important; }
+    .ck-editor__editable table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    .ck-editor__editable td, .ck-editor__editable th { border: 1px solid #d1d5db; padding: 6px 10px; }
+    .ck-editor__editable th { background: #f3f4f6; font-weight: 700; }
     .scope-html-view table { border-collapse: collapse; width: 100%; margin: 10px 0; }
     .scope-html-view td, .scope-html-view th { border: 1px solid var(--border2,#d1d5db); padding: 6px 10px; font-size: 12px; }
     .scope-html-view th { background: var(--s2,#f8f9fa); font-weight: 700; }
@@ -11612,68 +11607,58 @@
     }
 
     /* ── Quill rich-text editor component ──────────────────────── */
+    /* ── CKEditor 5 rich-text editor component ─────────────────── */
     function QuillEditor({ initialHtml, onSave, onCancel }) {
-      const containerRef = React.useRef(null);
-      const quillRef = React.useRef(null);
+      // "QuillEditor" name kept for compatibility; now powered by CKEditor 5
+      const elRef   = React.useRef(null);
+      const edRef   = React.useRef(null);
+      const [ready, setReady] = React.useState(false);
 
       React.useEffect(() => {
-        if (!containerRef.current || !window.Quill) return;
-        const q = new window.Quill(containerRef.current, {
-          theme: 'snow',
-          modules: {
-            toolbar: [
-              [{ header: [1, 2, 3, false] }],
-              ['bold', 'italic', 'underline', 'strike'],
-              [{ color: [] }, { background: [] }],
-              [{ list: 'ordered' }, { list: 'bullet' }],
-              [{ align: [] }],
-              ['blockquote', 'code-block'],
-              ['link'],
-              ['clean'],
+        if (!elRef.current || !window.ClassicEditor) return;
+        let mounted = true;
+        window.ClassicEditor.create(elRef.current, {
+          toolbar: {
+            items: [
+              'heading', '|',
+              'bold', 'italic', 'underline', 'strikethrough', '|',
+              'fontColor', 'fontBackgroundColor', '|',
+              'numberedList', 'bulletedList', '|',
+              'outdent', 'indent', '|',
+              'alignment', '|',
+              'insertTable', '|',
+              'blockQuote', 'code', '|',
+              'link', '|',
+              'undo', 'redo',
             ],
-            // disable Quill's own clipboard matcher so we can handle paste ourselves
-            clipboard: { matchVisual: false },
           },
-        });
-        if (initialHtml) q.root.innerHTML = initialHtml;
-        quillRef.current = q;
-
-        // Intercept paste — use raw clipboard HTML (preserves Word/Outlook tables)
-        q.root.addEventListener('paste', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const html = e.clipboardData && e.clipboardData.getData('text/html');
-          const text = e.clipboardData && e.clipboardData.getData('text/plain');
-          if (html) {
-            // Strip Word/Outlook namespace noise but keep table structure
-            const clean = html
-              .replace(/<\?xml[^>]*>/gi, '')
-              .replace(/<!--\[if[^\]]*\]>[\s\S]*?<!\[endif\]-->/gi, '')
-              .replace(/<o:p[^>]*>[\s\S]*?<\/o:p>/gi, '')
-              .replace(/\s*mso-[^;"]+;?/gi, '')
-              .replace(/\s*class="[^"]*"/gi, '')
-              .replace(/\s*style=""/gi, '');
-            const sel = q.getSelection(true);
-            q.clipboard.dangerouslyPasteHTML(sel ? sel.index : q.getLength(), clean);
-          } else if (text) {
-            const sel = q.getSelection(true);
-            q.insertText(sel ? sel.index : q.getLength(), text);
-          }
-        }, true);
-
-        return () => {};
+          table: {
+            contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells', 'tableCellProperties', 'tableProperties'],
+          },
+          initialData: initialHtml || '',
+        }).then(editor => {
+          if (!mounted) { editor.destroy(); return; }
+          edRef.current = editor;
+          setReady(true);
+        }).catch(() => {});
+        return () => {
+          mounted = false;
+          if (edRef.current) { edRef.current.destroy(); edRef.current = null; }
+        };
       }, []);
 
       return (
         <div>
-          <div ref={containerRef} />
+          <div ref={elRef} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             <button onClick={() => onCancel()}
               style={{ padding: '5px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12 }}>
               Cancel
             </button>
-            <button onClick={() => onSave(quillRef.current ? quillRef.current.root.innerHTML : '')}
-              style={{ padding: '5px 16px', borderRadius: 6, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+            <button disabled={!ready} onClick={() => {
+              const html = edRef.current ? edRef.current.getData() : '';
+              onSave(html);
+            }} style={{ padding: '5px 16px', borderRadius: 6, border: 'none', background: ready ? 'var(--brand)' : '#9ca3af', color: '#fff', cursor: ready ? 'pointer' : 'default', fontWeight: 700, fontSize: 12 }}>
               ✓ Save
             </button>
           </div>

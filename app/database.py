@@ -413,6 +413,106 @@ def _seed_project_progress(conn):
         )
 
 
+# ── Version Control scope seed ───────────────────────────────────
+
+_VC_SCOPE_GROUPS = [
+    ("Group 1 &#8212; Version Control Setup", [
+        ("US-01","Enable or Disable Version Control","As a system administrator, I want to enable or disable version control from system configuration so that the feature can be turned on or off per deployment needs."),
+    ]),
+    ("Group 2 &#8212; Version History Access &amp; Display", [
+        ("US-02","Show Version History Tab in Object Details","As a user, I want to see a Version History tab in the Object Details screen so that I can access all stored versions of the object in one place."),
+        ("US-03","View All Stored Versions for an Object","As a user, I want the Version History tab to display all stored versions of the selected object so that I can track its full change history."),
+        ("US-04","View Version Summary Information in the Table","As a user, I want each version row to show key summary information so that I can quickly identify and compare versions without opening each one."),
+        ("US-05","Access Version Actions from Each Row","As a user, I want each version row to provide actions so that I can perform version-related operations directly from the history list."),
+    ]),
+    ("Group 3 &#8212; Version Reuse &amp; Object Creation", [
+        ("US-06","Apply a Stored Version to Create a New Version","As a user, I want to apply a stored version to the same object so that I can create a new version based on historical data."),
+        ("US-07","Create a New Object from a Stored Version","As a user, I want to create a new object from a stored version so that I can reuse historical data to start a new record."),
+        ("US-08","Create an Independent Object from a Stored Version","As a user, I want a new object created from a stored version to be independent so that it is treated as a brand-new standalone record."),
+    ]),
+    ("Group 4 &#8212; Version Comparison", [
+        ("US-09","Compare a Version with Another Version","As a user, I want to compare one version with another so that I can understand what changed between any two points in time."),
+        ("US-10","Show Clear Comparison Label","As a user, I want the comparison screen to clearly identify the versions being compared so that I know exactly which two versions I am viewing."),
+    ]),
+    ("Group 5 &#8212; Notifications", [
+        ("US-11","Subscribe for Notifications from Version History","As a user, I want to subscribe for notifications from the Version History tab so that I can be informed when changes occur on a versioned object."),
+        ("US-12","Choose Between Notification Subscription Options","As a user, I want to select between two subscription options so that I can control the type of notifications I receive."),
+    ]),
+    ("Group 6 &#8212; Version Details &amp; Data Integrity", [
+        ("US-13","View Version Details in Read-Only Mode","As a user, I want to open version details in view mode only so that I can review stored version information without accidentally changing it."),
+        ("US-14","Prevent Editing of Stored Versions from History","As a user, I want stored versions to remain non-editable from history so that historical records remain accurate and tamper-proof."),
+        ("US-15","View Stored Object Details and Linked Object Names","As a user, I want version details to display the stored object details and linked object names so that I have the full context of the version at the time it was saved."),
+        ("US-16","Preserve Historical Snapshot Exactly as Stored","As a user, I want the historical version view to preserve the exact snapshot stored at the time of creation so that the record is never altered by future changes."),
+    ]),
+    ("Group 7 &#8212; Missing Linked Objects Handling", [
+        ("US-17","Detect Missing Linked Objects When Reusing Historical Versions","As a user, I want the system to detect unavailable linked objects when I apply or copy a historical version so that I am warned before proceeding."),
+        ("US-18","Show Summary of Missing Linked Objects","As a user, I want the system to show a summary of missing linked objects so that I can clearly see what is unavailable before confirming an action."),
+        ("US-19","Show Missing Linked Object Name and Type","As a user, I want the missing items summary to show the name and type of each unavailable linked object so that I can identify exactly what is missing."),
+        ("US-20","Support Different Linked Object Types in Missing Items Summary","As a user, I want the missing items summary to support different linked object types so that all unavailable dependencies are covered regardless of their type."),
+    ]),
+    ("Group 8 &#8212; Version Naming &amp; Format", [
+        ("US-21","Display Version Name in Version Details","As a user, I want the version name or code to be displayed when I open version details so that I can identify the version at a glance."),
+        ("US-22","Show Version Name Using Configured Format","As a user, I want the version name to follow the configured format so that version labels are consistent and meaningful across all objects."),
+        ("US-23","Use Default Version Format When No Custom Pattern Is Configured","As a user, I want the system to use the default version format when no custom pattern is configured so that versions are always named even without admin setup."),
+    ]),
+]
+
+_VC_SUMMARY = [
+    ("1","Version Control Setup","1"),
+    ("2","Version History Access &amp; Display","4"),
+    ("3","Version Reuse &amp; Object Creation","3"),
+    ("4","Version Comparison","2"),
+    ("5","Notifications","2"),
+    ("6","Version Details &amp; Data Integrity","4"),
+    ("7","Missing Linked Objects Handling","4"),
+    ("8","Version Naming &amp; Format","3"),
+]
+
+def _build_vc_scope_html() -> str:
+    TH = 'style="padding:7px 10px;background:#f3f4f6;border:1px solid #d1d5db;font-size:11px;font-weight:700;text-align:left;"'
+    TD_ID = 'style="padding:8px 10px;border:1px solid #d1d5db;font-size:11px;font-weight:700;color:#6366f1;vertical-align:top;white-space:nowrap;"'
+    TD    = 'style="padding:8px 10px;border:1px solid #d1d5db;font-size:12px;font-weight:600;vertical-align:top;"'
+    TD_D  = 'style="padding:8px 10px;border:1px solid #d1d5db;font-size:11px;color:#6b7280;vertical-align:top;font-style:italic;"'
+    H2    = 'style="font-size:13px;font-weight:800;color:#6366f1;text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid #e5e7eb;padding-bottom:4px;margin-top:22px;margin-bottom:0;"'
+    TABLE = 'style="width:100%;border-collapse:collapse;margin:0 0 18px 0;"'
+    parts = [
+        '<h1 style="font-size:18px;font-weight:800;margin-bottom:4px;">Cubes EW &#8212; Version Control Project Deliverables</h1>',
+        '<p style="color:#6366f1;font-weight:600;margin-bottom:20px;font-size:13px;">Feature: EW - Objects Versioning and History &nbsp;|&nbsp; <strong>Total User Stories: 23</strong></p>',
+    ]
+    for grp_title, stories in _VC_SCOPE_GROUPS:
+        parts.append(f'<h2 {H2}>{grp_title}</h2>')
+        parts.append(f'<table {TABLE}><thead><tr>'
+                     f'<th {TH} style="width:60px;padding:7px 10px;background:#f3f4f6;border:1px solid #d1d5db;font-size:11px;font-weight:700;">#</th>'
+                     f'<th {TH}>Deliverable</th><th {TH}>Description</th></tr></thead><tbody>')
+        for us_id, title, desc in stories:
+            parts.append(f'<tr><td {TD_ID}>{us_id}</td><td {TD}>{title}</td><td {TD_D}>{desc}</td></tr>')
+        parts.append('</tbody></table>')
+    # summary
+    parts.append(f'<h2 {H2}>Summary</h2>')
+    parts.append(f'<table {TABLE}><thead><tr>'
+                 f'<th {TH} style="width:60px;padding:7px 10px;background:#f3f4f6;border:1px solid #d1d5db;font-size:11px;font-weight:700;">Group</th>'
+                 f'<th {TH}>Theme</th>'
+                 f'<th {TH} style="width:80px;padding:7px 10px;background:#f3f4f6;border:1px solid #d1d5db;font-size:11px;font-weight:700;text-align:center;"># Stories</th>'
+                 '</tr></thead><tbody>')
+    for grp, theme, cnt in _VC_SUMMARY:
+        parts.append(f'<tr><td style="padding:7px 10px;border:1px solid #d1d5db;font-size:11px;font-weight:700;color:#6366f1;text-align:center;">{grp}</td>'
+                     f'<td style="padding:7px 10px;border:1px solid #d1d5db;font-size:12px;">{theme}</td>'
+                     f'<td style="padding:7px 10px;border:1px solid #d1d5db;font-size:12px;font-weight:700;text-align:center;">{cnt}</td></tr>')
+    parts.append('<tr style="background:#f3f4f6;"><td colspan="2" style="padding:8px 10px;border:1px solid #d1d5db;font-size:12px;font-weight:800;">Total</td>'
+                 '<td style="padding:8px 10px;border:1px solid #d1d5db;font-size:13px;font-weight:800;text-align:center;color:#6366f1;">23</td></tr>')
+    parts.append('</tbody></table>')
+    return ''.join(parts)
+
+def _seed_vc_scope(conn) -> None:
+    """Insert Version Control scope HTML if the project exists and scope is not yet set."""
+    try:
+        row = conn.execute("SELECT scope FROM projects WHERE code='CUBE515D'").fetchone()
+        if row is not None and not row[0]:
+            conn.execute("UPDATE projects SET scope=? WHERE code='CUBE515D'", (_build_vc_scope_html(),))
+    except Exception:
+        pass
+
+
 # ── init & migration ─────────────────────────────────────────────
 
 def init_db() -> None:
@@ -483,6 +583,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN scope TEXT")
         except sqlite3.OperationalError:
             pass
+
+        # Seed Version Control scope HTML (idempotent — only runs when scope is NULL)
+        _seed_vc_scope(conn)
 
         # Seed default dashboard settings if missing
         row = conn.execute("SELECT id FROM dashboard_settings WHERE id='global'").fetchone()
