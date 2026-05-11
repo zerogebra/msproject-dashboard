@@ -215,6 +215,8 @@ def portfolio(username: str = "user"):
                 "exec_additional_days":      p["exec_additional_days"] if "exec_additional_days" in p.keys() else None,
                 "exec_additional_days_impl": p["exec_additional_days_impl"] if "exec_additional_days_impl" in p.keys() else None,
                 "scope":            p["scope"] if "scope" in p.keys() else None,
+                "plan_pct":         p["plan_pct"] if "plan_pct" in p.keys() else None,
+                "is_quick_add":     bool(p["is_quick_add"]) if "is_quick_add" in p.keys() else False,
                 "items":            items,
             })
 
@@ -550,6 +552,83 @@ def create_project(req: ProjectCreate, caller_id: str):
     return {"status": "ok", "code": code}
 
 
+class QuickAddProjectRequest(BaseModel):
+    name: str
+    team_type: str = "cubes"
+    requested_by: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    health: str = "ontrack"
+    plan_pct: int = 0
+    progress: float = 0.0
+    exec_additional_days: Optional[int] = None
+    comment: Optional[str] = None
+
+@app.post("/api/projects/quick-add")
+def quick_add_project(req: QuickAddProjectRequest, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    import random, string
+    suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+    code = "QA" + suffix
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO projects (code, name, mpp_path, health, progress, start_date, end_date, "
+            "created_at, team_type, is_quick_add, plan_pct, requested_by, exec_additional_days) "
+            "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?)",
+            (code, req.name, "", req.health, req.progress,
+             req.start_date, req.end_date, now_iso,
+             req.team_type, req.plan_pct, req.requested_by,
+             req.exec_additional_days)
+        )
+        if req.comment:
+            conn.execute(
+                "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) "
+                "VALUES (?,?,?,?)",
+                (code, req.comment, caller_id, now_iso)
+            )
+    return {"status": "ok", "code": code}
+
+
+@app.put("/api/projects/{code}/quick-update")
+def quick_update_project(code: str, req: QuickAddProjectRequest, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE projects SET name=?, health=?, progress=?, start_date=?, end_date=?, "
+            "team_type=?, plan_pct=?, requested_by=?, exec_additional_days=? WHERE code=?",
+            (req.name, req.health, req.progress, req.start_date, req.end_date,
+             req.team_type, req.plan_pct, req.requested_by,
+             req.exec_additional_days, code)
+        )
+        if req.comment is not None:
+            conn.execute(
+                "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) "
+                "VALUES (?,?,?,?)",
+                (code, req.comment, caller_id, now_iso)
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/api/projects/{code}/quick-delete")
+def quick_delete_project(code: str, caller_id: str):
+    _require_admin(caller_id)
+    from app.database import get_conn
+    with get_conn() as conn:
+        row = conn.execute("SELECT is_quick_add FROM projects WHERE code=?", (code,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Project not found.")
+        is_qa = bool(row["is_quick_add"]) if "is_quick_add" in row.keys() else False
+        if not is_qa:
+            raise HTTPException(403, "Only quick-add projects can be deleted via this endpoint.")
+        conn.execute("DELETE FROM projects WHERE code=?", (code,))
+        conn.execute("DELETE FROM project_comments WHERE project_code=?", (code,))
+    return {"status": "ok"}
+
+
 @app.post("/api/projects/{code}/clone")
 def clone_project(code: str, caller_id: str):
     _require_admin(caller_id)
@@ -656,7 +735,6 @@ class ProjectScopeUpdate(BaseModel):
 
 @app.put("/api/projects/{code}/scope")
 def update_project_scope(code: str, req: ProjectScopeUpdate, caller_id: str = ""):
-    # Any logged-in user can update scope; admin preferred but not enforced
     from app.database import get_conn
     with get_conn() as conn:
         try:
@@ -668,12 +746,16 @@ def update_project_scope(code: str, req: ProjectScopeUpdate, caller_id: str = ""
         try:
             conn.execute("UPDATE projects SET scope=? WHERE code=?", (req.scope, code))
         except Exception:
-            # scope column may not exist yet on this deployment
             try:
                 conn.execute("ALTER TABLE projects ADD COLUMN scope TEXT")
                 conn.execute("UPDATE projects SET scope=? WHERE code=?", (req.scope, code))
             except Exception as e2:
                 raise HTTPException(500, f"Could not save scope: {e2}")
+        # Flush WAL immediately so data is visible to all new connections
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except Exception:
+            pass
     return {"status": "ok"}
 
 

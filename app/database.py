@@ -905,6 +905,18 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass
 
+        # schema v2.13 — plan_pct on projects (manual plan % for quick-add / lightweight projects)
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN plan_pct INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+
+        # schema v2.13 — is_quick_add flag on projects
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN is_quick_add INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+
         # data migration: ensure all projects with a cr_id are flagged as lightweight
         # (older rows may have is_lightweight=0 if seeded before schema v1.8)
         try:
