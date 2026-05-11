@@ -4558,11 +4558,11 @@
                             {p.name}
                           </span>
                           {p.is_quick_add && isAdmin && editingQuick !== p.code && (
-                            <span style={{ display:'flex', gap:3 }}>
-                              <span title="Edit project" style={{ cursor:'pointer', fontSize:11, opacity:0.5 }}
-                                onClick={() => { setEditingQuick(p.code); setEditQuickForm({ name:p.name, team_type:p.team_type, requested_by:p.requested_by||'', start_date:p.start||'', end_date:p.end||'', health:p.health||'ontrack', plan_pct:String(p.plan_pct||0), progress:String(Math.round(p.progress||0)), exec_additional_days:p.exec_additional_days!=null?String(p.exec_additional_days):'', comment:comments[p.code]||'' }); }}>✎</span>
-                              <span title="Delete project" style={{ cursor:'pointer', fontSize:11, opacity:0.4, color:'var(--r)' }}
-                                onClick={() => deleteQuickProject(p.code, p.name)}>🗑</span>
+                            <span style={{ display:'flex', gap:4, alignItems:'center', flexShrink:0 }}>
+                              <button title="Edit this project" style={{ fontSize:10, padding:'1px 6px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)', color:'var(--brand)', cursor:'pointer', fontWeight:600, lineHeight:1.6 }}
+                                onClick={() => { setEditingQuick(p.code); setEditQuickForm({ name:p.name, team_type:p.team_type, requested_by:p.requested_by||'', start_date:p.start||'', end_date:p.end||'', health:p.health||'ontrack', plan_pct:String(p.plan_pct||0), progress:String(Math.round(p.progress||0)), exec_additional_days:p.exec_additional_days!=null?String(p.exec_additional_days):'', comment:comments[p.code]||'' }); }}>✎</button>
+                              <button title="Delete this project" style={{ fontSize:10, padding:'1px 6px', borderRadius:4, border:'1px solid rgba(239,68,68,.4)', background:'rgba(239,68,68,.06)', color:'#dc2626', cursor:'pointer', fontWeight:600, lineHeight:1.6 }}
+                                onClick={() => deleteQuickProject(p.code, p.name)}>🗑 Delete</button>
                             </span>
                           )}
                         </div>
