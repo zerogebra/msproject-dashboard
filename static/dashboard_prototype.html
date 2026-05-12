@@ -2703,15 +2703,22 @@
         const leaves = items.filter(t => !t.is_summary && !t.is_milestone);
         const totalDur = leaves.reduce((s, c) => s + taskDuration(c), 0);
         const weighted  = leaves.reduce((s, c) => s + (c.pct || 0) * taskDuration(c), 0);
+        // For quick-add projects (no tasks), use the stored DB progress value directly.
+        // For real projects, compute from weighted leaf tasks.
         const progress = leaves.length > 0
           ? Math.round(weighted / totalDur)
-          : (rootItem ? Math.round(rootItem.pct) : 0);
+          : (rootItem ? Math.round(rootItem.pct) : Math.round(p.progress || 0));
 
         // Use only non-summary tasks for project start/end so stale summary wrappers don't inflate the dates
         const nonSummary = items.filter(t => !t.is_summary);
         const ss = nonSummary.map(t => t.start).filter(Boolean).sort();
         const ee = nonSummary.map(t => t.end).filter(Boolean).sort();
         const pEnd = ee[ee.length - 1];
+
+        // For quick-add projects use the manually-set health from DB; otherwise compute from rag().
+        const computedHealth = rag(progress, pEnd || p.end_date, ss[0] || p.start_date);
+        const health = (p.is_quick_add && p.health) ? p.health : computedHealth;
+
         return {
           code: p.code, name: p.name, mpp_path: p.mpp_path || '',
           team_type: p.team_type || 'cubes',
@@ -2720,8 +2727,7 @@
           requested_by: p.requested_by || null,
           exec_additional_days: p.exec_additional_days ?? null,
           exec_additional_days_impl: p.exec_additional_days_impl ?? null,
-          color, progress,
-          health: rag(progress, pEnd || p.end_date, ss[0] || p.start_date),
+          color, progress, health,
           start: ss[0] || p.start_date || null,
           end:   pEnd  || p.end_date   || null,
           // Preserve DB fields not derived from tasks
