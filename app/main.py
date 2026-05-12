@@ -217,6 +217,9 @@ def portfolio(username: str = "user"):
                 "scope":            p["scope"] if "scope" in p.keys() else None,
                 "plan_pct":         p["plan_pct"] if "plan_pct" in p.keys() else None,
                 "is_quick_add":     bool(p["is_quick_add"]) if "is_quick_add" in p.keys() else False,
+                "start_date":       p["start_date"] if "start_date" in p.keys() else None,
+                "end_date":         p["end_date"] if "end_date" in p.keys() else None,
+                "health":           p["health"] if "health" in p.keys() else "ontrack",
                 "items":            items,
             })
 
@@ -569,26 +572,40 @@ def quick_add_project(req: QuickAddProjectRequest, caller_id: str):
     _require_admin(caller_id)
     from app.database import get_conn
     import random, string
-    suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-    code = "QA" + suffix
+
+    def _make_code():
+        suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+        return "QA" + suffix
+
     now_iso = datetime.now(timezone.utc).isoformat()
+    codes = []
+
+    # Always create in BOTH cubes and implementation sections
+    team_types = ["cubes", "implementation"]
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO projects (code, name, mpp_path, health, progress, start_date, end_date, "
-            "created_at, team_type, is_quick_add, plan_pct, requested_by, exec_additional_days) "
-            "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?)",
-            (code, req.name, "", req.health, req.progress,
-             req.start_date, req.end_date, now_iso,
-             req.team_type, req.plan_pct, req.requested_by,
-             req.exec_additional_days)
-        )
-        if req.comment:
+        for tt in team_types:
+            code = _make_code()
+            codes.append(code)
+            # Pick the right buffer field
+            add_days_cubes = req.exec_additional_days if tt == "cubes" else None
+            add_days_impl  = req.exec_additional_days if tt == "implementation" else None
             conn.execute(
-                "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) "
-                "VALUES (?,?,?,?)",
-                (code, req.comment, caller_id, now_iso)
+                "INSERT INTO projects (code, name, mpp_path, health, progress, start_date, end_date, "
+                "created_at, team_type, is_quick_add, plan_pct, requested_by, "
+                "exec_additional_days, exec_additional_days_impl) "
+                "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?)",
+                (code, req.name, "", req.health, req.progress,
+                 req.start_date, req.end_date, now_iso, tt,
+                 req.plan_pct, req.requested_by,
+                 add_days_cubes, add_days_impl)
             )
-    return {"status": "ok", "code": code}
+            if req.comment:
+                conn.execute(
+                    "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) "
+                    "VALUES (?,?,?,?)",
+                    (code, req.comment, caller_id, now_iso)
+                )
+    return {"status": "ok", "codes": codes}
 
 
 @app.put("/api/projects/{code}/quick-update")
@@ -597,13 +614,28 @@ def quick_update_project(code: str, req: QuickAddProjectRequest, caller_id: str)
     from app.database import get_conn
     now_iso = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
+        # Get original name to find the sibling entry (same name, different team_type)
+        orig = conn.execute("SELECT name FROM projects WHERE code=?", (code,)).fetchone()
+        orig_name = orig["name"] if orig else None
+
+        # Update this specific entry
         conn.execute(
             "UPDATE projects SET name=?, health=?, progress=?, start_date=?, end_date=?, "
-            "team_type=?, plan_pct=?, requested_by=?, exec_additional_days=? WHERE code=?",
+            "plan_pct=?, requested_by=?, exec_additional_days=?, exec_additional_days_impl=? WHERE code=?",
             (req.name, req.health, req.progress, req.start_date, req.end_date,
-             req.team_type, req.plan_pct, req.requested_by,
-             req.exec_additional_days, code)
+             req.plan_pct, req.requested_by,
+             req.exec_additional_days, req.exec_additional_days, code)
         )
+        # Also update sibling entry (same original name, is_quick_add=1, different code)
+        if orig_name:
+            conn.execute(
+                "UPDATE projects SET name=?, health=?, progress=?, start_date=?, end_date=?, "
+                "plan_pct=?, requested_by=?, exec_additional_days=?, exec_additional_days_impl=? "
+                "WHERE name=? AND is_quick_add=1 AND code!=?",
+                (req.name, req.health, req.progress, req.start_date, req.end_date,
+                 req.plan_pct, req.requested_by,
+                 req.exec_additional_days, req.exec_additional_days, orig_name, code)
+            )
         if req.comment is not None:
             conn.execute(
                 "INSERT OR REPLACE INTO project_comments (project_code, comment, updated_by, updated_at) "
@@ -618,14 +650,20 @@ def quick_delete_project(code: str, caller_id: str):
     _require_admin(caller_id)
     from app.database import get_conn
     with get_conn() as conn:
-        row = conn.execute("SELECT is_quick_add FROM projects WHERE code=?", (code,)).fetchone()
+        row = conn.execute("SELECT name, is_quick_add FROM projects WHERE code=?", (code,)).fetchone()
         if not row:
             raise HTTPException(404, "Project not found.")
         is_qa = bool(row["is_quick_add"]) if "is_quick_add" in row.keys() else False
         if not is_qa:
             raise HTTPException(403, "Only quick-add projects can be deleted via this endpoint.")
-        conn.execute("DELETE FROM projects WHERE code=?", (code,))
-        conn.execute("DELETE FROM project_comments WHERE project_code=?", (code,))
+        proj_name = row["name"]
+        # Delete ALL quick-add entries with the same name (covers both cubes + impl siblings)
+        siblings = conn.execute(
+            "SELECT code FROM projects WHERE name=? AND is_quick_add=1", (proj_name,)
+        ).fetchall()
+        for s in siblings:
+            conn.execute("DELETE FROM projects WHERE code=?", (s["code"],))
+            conn.execute("DELETE FROM project_comments WHERE project_code=?", (s["code"],))
     return {"status": "ok"}
 
 
