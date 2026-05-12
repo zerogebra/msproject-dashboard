@@ -2715,9 +2715,11 @@
         const ee = nonSummary.map(t => t.end).filter(Boolean).sort();
         const pEnd = ee[ee.length - 1];
 
+        // Normalize legacy 'ontrack' value to standard 'G' so healthLabel/healthColor work correctly
+        const normalizeH = h => h === 'ontrack' ? 'G' : (['G','A','R','C'].includes(h) ? h : null);
         // For quick-add projects use the manually-set health from DB; otherwise compute from rag().
         const computedHealth = rag(progress, pEnd || p.end_date, ss[0] || p.start_date);
-        const health = (p.is_quick_add && p.health) ? p.health : computedHealth;
+        const health = (p.is_quick_add && normalizeH(p.health)) ? normalizeH(p.health) : computedHealth;
 
         return {
           code: p.code, name: p.name, mpp_path: p.mpp_path || '',
@@ -4254,7 +4256,7 @@
       const [savingScope, setSavingScope] = useState(false);
 
       // Quick Add project modal
-      const QUICK_FORM_DEFAULTS = { name:'', requested_by:'', start_date:'', end_date:'', health:'ontrack', plan_pct:'0', progress:'0', exec_additional_days:'', comment:'' };
+      const QUICK_FORM_DEFAULTS = { name:'', requested_by:'', start_date:'', end_date:'', health:'G', plan_pct:'0', progress:'0', exec_additional_days:'', comment:'' };
       const [quickAddModal, setQuickAddModal] = useState(null); // null | 'cubes' | 'implementation'
       const [quickAddForm, setQuickAddForm] = useState(QUICK_FORM_DEFAULTS);
       const [savingQuickAdd, setSavingQuickAdd] = useState(false);
@@ -4574,7 +4576,7 @@
                           {p.is_quick_add && isAdmin && (
                             <span style={{ display:'flex', gap:4, alignItems:'center', flexShrink:0 }}>
                               <button title="Edit this project" style={{ fontSize:10, padding:'1px 6px', borderRadius:4, border:'1px solid var(--border)', background:'var(--s2)', color:'var(--brand)', cursor:'pointer', fontWeight:600, lineHeight:1.6 }}
-                                onClick={() => { setEditingQuick(p.code); setEditQuickForm({ name:p.name, team_type:p.team_type, requested_by:p.requested_by||'', start_date:p.start||'', end_date:p.end||'', health:p.health||'G', plan_pct:String(p.plan_pct??0), progress:String(Math.round(p.progress||0)), exec_additional_days:p.exec_additional_days!=null?String(p.exec_additional_days):'', comment:comments[p.code]||'' }); }}>✎ Edit</button>
+                                onClick={() => { const nh = h => h==='ontrack'?'G':(['G','A','R','C'].includes(h)?h:'G'); setEditingQuick(p.code); setEditQuickForm({ name:p.name, team_type:p.team_type, requested_by:p.requested_by||'', start_date:p.start||'', end_date:p.end||'', health:nh(p.health), plan_pct:String(p.plan_pct??0), progress:String(Math.round(p.progress||0)), exec_additional_days:p.exec_additional_days!=null?String(p.exec_additional_days):'', comment:comments[p.code]||'' }); }}>✎ Edit</button>
                               <button title="Delete this project" style={{ fontSize:10, padding:'1px 6px', borderRadius:4, border:'1px solid rgba(239,68,68,.4)', background:'rgba(239,68,68,.06)', color:'#dc2626', cursor:'pointer', fontWeight:600, lineHeight:1.6 }}
                                 onClick={() => deleteQuickProject(p.code, p.name)}>🗑 Delete</button>
                             </span>
@@ -5103,7 +5105,6 @@
                       <option value="A">🟡 At Risk</option>
                       <option value="R">🔴 Delayed</option>
                       <option value="C">🔵 Completed</option>
-                      <option value="ontrack">🟢 On Track (default)</option>
                     </select>
                   </div>
                 </div>
