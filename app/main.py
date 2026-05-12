@@ -220,6 +220,7 @@ def portfolio(username: str = "user"):
                 "start_date":       p["start_date"] if "start_date" in p.keys() else None,
                 "end_date":         p["end_date"] if "end_date" in p.keys() else None,
                 "health":           p["health"] if "health" in p.keys() else "ontrack",
+                "progress":         float(p["progress"]) if "progress" in p.keys() else 0.0,
                 "items":            items,
             })
 
