@@ -10537,61 +10537,9 @@
 
       React.useEffect(() => {
         api.getC2026(user.id).then(d => {
-          // Recalculate all dependency-driven dates on load so stale stored dates are corrected
-          if (d && d.projects) {
-            const cm = {};
-            (d.projects || []).forEach((proj, pi) => {
-              (proj.phases || []).forEach((ph, phi) => {
-                (ph.stages
-                  ? ph.stages.flatMap((st, si) => (st.team_rows||[]).map(row => ({row, si})))
-                  : (ph.team_rows||[]).map(row => ({row, si: null}))
-                ).forEach(({row, si}) => {
-                  const t = row.team ? row.team.replace(/\//g,'').replace(/\s+/g,'') : '';
-                  const code = si != null ? `P${pi+1}.Ph${phi+1}.St${si+1}.${t}` : `P${pi+1}.Ph${phi+1}.${t}`;
-                  cm[code] = row;
-                });
-              });
-            });
-            // Run full cascade for every row that has dependencies
-            let dirty = new Set();
-            (d.projects || []).forEach((proj, pi) => {
-              (proj.phases || []).forEach((ph, phi) => {
-                (ph.stages
-                  ? ph.stages.flatMap((st, si) => (st.team_rows||[]).map(row => ({row, si})))
-                  : (ph.team_rows||[]).map(row => ({row, si: null}))
-                ).forEach(({row, si}) => {
-                  if (row.depends_on && row.depends_on.length) {
-                    const t = row.team ? row.team.replace(/\//g,'').replace(/\s+/g,'') : '';
-                    const code = si != null ? `P${pi+1}.Ph${phi+1}.St${si+1}.${t}` : `P${pi+1}.Ph${phi+1}.${t}`;
-                    // autoCalc with isEstStage for St1 rows
-                    const prevEnd = row.end;
-                    // inline autoCalc logic: recalc depStart only
-                    const deps = row.depends_on || [];
-                    let latest = null;
-                    for (const dep of deps) {
-                      const ref = cm[dep.ref];
-                      if (!ref) continue;
-                      let refEnd = ref.end || null;
-                      if (!refEnd && ref.start && ref.days) {
-                        refEnd = addWorkDays(ref.start, ref.days - 1);
-                      }
-                      if (refEnd) {
-                        const calcStart = nextWorkDay(refEnd);
-                        if (!latest || calcStart > latest) latest = calcStart;
-                      }
-                    }
-                    if (latest && si !== 0) {
-                      row.start = latest;
-                      if (row.days != null && row.days > 0) {
-                        row.end = addWorkDays(latest, row.days - 1);
-                      }
-                      if (row.end !== prevEnd) dirty.add(code);
-                    }
-                  }
-                });
-              });
-            });
-          }
+          // Same rules as inline edits: Stage1 end from start+days, deps, FS/SS/lag via resolveDepStart,
+          // manual start preserved on refresh unless a cascade replans dependents.
+          normalizeLoadedC2026(d);
           setPlan(d);
         });
       }, []);
@@ -10758,32 +10706,30 @@
       }
 
       // ─── Date auto-calc: changedField tells us which value the user just set ──
-      // Priority rules:
-      //   days changed  → recompute end from start + days (always, even if end existed)
-      //   start changed → recompute end from start + days (if days known)
-      //   end changed   → recompute days from start ↔ end
+      // changedField 'load'  = refresh from API: apply deps only when start is empty (keep manual dates)
+      // changedField 'cascade' = predecessor moved: always replan from resolveDepStart
+      // Priority rules (non–Stage-1): days/start/end edits as below; load/cascade fill gaps like null.
       function autoCalc(row, codeMap, changedField, isEstStage) {
-        // isEstStage = true for Stage 1 rows: `days` is an estimation OUTPUT (dev effort),
-        // not a duration, so it must never drive start/end date calculations.
+        const fillLikeNull = changedField == null || changedField === 'load' || changedField === 'cascade';
 
-        // Dependency overrides start (unless the user just manually set start)
+        // Dependencies (full FS/SS/lag via resolveDepStart — single code path for load + edits + cascade)
         if (codeMap && changedField !== 'start') {
           const depStart = resolveDepStart(row, codeMap);
           if (depStart) {
-            row.start = depStart;
-            // Only recompute end from dep-start + days for non-estimation rows
-            if (!isEstStage && row.days != null && row.days > 0) {
-              row.end = addWorkDays(depStart, row.days - 1);
+            if (changedField === 'cascade' || !row.start) {
+              row.start = depStart;
+            }
+            if (!isEstStage && row.days != null && row.days > 0 && row.start) {
+              row.end = addWorkDays(row.start, row.days - 1);
             }
           }
         }
-        // Stage 1 (estimation): `days` still flows to Stage 2 as duration, but we also keep a real
-        // calendar span on Stage 1 so manual starts (e.g. P4.Ph1.St1.BA) drive End and FS deps on St2.
+        // Stage 1: days copy to St2 duration elsewhere; here keep a Gantt span (start + days → end)
         if (isEstStage) {
           const hasS = !!row.start, hasE = !!row.end, hasD = row.days != null && row.days > 0;
           if (changedField === 'end' && hasS && hasE) {
             row.days = diffWorkDays(row.start, row.end);
-          } else if (changedField === 'days' || changedField === 'start' || changedField === null) {
+          } else if (changedField === 'days' || changedField === 'start' || fillLikeNull) {
             if (hasD && hasS) row.end = addWorkDays(row.start, row.days - 1);
             else if (hasD && hasE && !hasS) row.start = addWorkDays(row.end, -(row.days - 1));
           }
@@ -10791,21 +10737,34 @@
         }
         const hasS = !!row.start, hasE = !!row.end, hasD = row.days != null && row.days > 0;
         if (changedField === 'days' || changedField === 'start') {
-          // User set days or start → always compute end
           if (hasD && hasS) { row.end = addWorkDays(row.start, row.days - 1); }
           else if (hasD && hasE) { row.start = addWorkDays(row.end, -(row.days - 1)); }
         } else if (changedField === 'end') {
-          // User set end → recompute days
           if (hasS && hasE) { row.days = diffWorkDays(row.start, row.end); }
         } else {
-          // No hint (initial load): fill missing third value
           if (hasD && hasS && !hasE) { row.end = addWorkDays(row.start, row.days - 1); }
           else if (hasS && hasE && !hasD) { row.days = diffWorkDays(row.start, row.end); }
           else if (hasD && hasE && !hasS) { row.start = addWorkDays(row.end, -(row.days - 1)); }
         }
       }
+      function normalizeLoadedC2026(planData) {
+        if (!planData?.projects?.length) return;
+        const cm = buildCodeMap(planData);
+        for (let pass = 0; pass < 16; pass++) {
+          let touched = false;
+          planData.projects.forEach((proj, pi) => {
+            (proj.phases || []).forEach((ph, phi) => {
+              allPhaseRows(ph).forEach(({ row, si }) => {
+                const os = row.start, oe = row.end;
+                autoCalc(row, cm, 'load', si === 0);
+                if (row.start !== os || row.end !== oe) touched = true;
+              });
+            });
+          });
+          if (!touched) break;
+        }
+      }
       function _cascadeRows(n, cm, changedCode) {
-        // Propagate start/end changes through all dependent rows (flat + staged)
         let dirty = new Set([changedCode]);
         for (let pass = 0; pass < 10 && dirty.size; pass++) {
           const nextDirty = new Set();
@@ -10814,7 +10773,7 @@
               allPhaseRows(ph).forEach(({row: depRow, si: sij}) => {
                 if (depRow.depends_on && depRow.depends_on.some(d => dirty.has(d.ref))) {
                   const prevEnd = depRow.end;
-                  autoCalc(depRow, cm, null, sij === 0);
+                  autoCalc(depRow, cm, 'cascade', sij === 0);
                   if (depRow.end !== prevEnd) nextDirty.add(rowCode(pj, phj, depRow.team, sij));
                 }
               });
@@ -11226,7 +11185,7 @@
                                             r.depends_on.push({ ref: trimmed, type:'FS', lag:0 });
                                           }
                                           const cm = buildCodeMap(n);
-                                          autoCalc(r, cm, null, si === 0);
+                                          autoCalc(r, cm, 'cascade', si === 0);
                                           _cascadeRows(n, cm, code);
                                         });
                                       }
