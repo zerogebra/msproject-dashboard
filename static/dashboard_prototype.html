@@ -10777,11 +10777,16 @@
             }
           }
         }
-        // Estimation stage rows: start/end are independent; days is just metadata → stop here
+        // Stage 1 (estimation): `days` still flows to Stage 2 as duration, but we also keep a real
+        // calendar span on Stage 1 so manual starts (e.g. P4.Ph1.St1.BA) drive End and FS deps on St2.
         if (isEstStage) {
-          // Only allow end→start back-calc if user manually sets end (so start/end still work)
-          const hasS = !!row.start, hasE = !!row.end;
-          if (changedField === 'end' && hasS && hasE) { /* keep end as-is, no days recalc */ }
+          const hasS = !!row.start, hasE = !!row.end, hasD = row.days != null && row.days > 0;
+          if (changedField === 'end' && hasS && hasE) {
+            row.days = diffWorkDays(row.start, row.end);
+          } else if (changedField === 'days' || changedField === 'start' || changedField === null) {
+            if (hasD && hasS) row.end = addWorkDays(row.start, row.days - 1);
+            else if (hasD && hasE && !hasS) row.start = addWorkDays(row.end, -(row.days - 1));
+          }
           return;
         }
         const hasS = !!row.start, hasE = !!row.end, hasD = row.days != null && row.days > 0;
@@ -10842,6 +10847,18 @@
               const st2Row = st2.team_rows.find(tr => tr.team === r.team);
               if (st2Row) {
                 st2Row.days = val;
+                autoCalc(st2Row, cm, 'days', false);
+                _cascadeRows(n, cm, rowCode(pi, phi, st2Row.team, 1));
+              }
+            }
+          }
+          // Stage 1 end edited → duration (days) may have changed → sync St2 duration
+          if (isEst && field === 'end' && r.days != null) {
+            const st2 = n.projects[pi].phases[phi].stages[1];
+            if (st2) {
+              const st2Row = st2.team_rows.find(tr => tr.team === r.team);
+              if (st2Row) {
+                st2Row.days = r.days;
                 autoCalc(st2Row, cm, 'days', false);
                 _cascadeRows(n, cm, rowCode(pi, phi, st2Row.team, 1));
               }
@@ -11106,7 +11123,8 @@
                             const codeMapNow = buildCodeMap(plan);
                             const depStart = resolveDepStart(row, codeMapNow);
                             const startIsAuto = !!(row.depends_on && row.depends_on.length && depStart);
-                            const endAuto = row.days != null && !!(startIsAuto ? depStart : row.start);
+                            const baseStart = row.start || (startIsAuto ? depStart : null);
+                            const endAuto = row.days != null && !!baseStart;
                             const deps = row.depends_on || [];
                             const allCodes = Object.keys(codeMapNow).filter(c => c !== code);
                             const isStaged = si != null;
@@ -11253,8 +11271,8 @@
                                 </td>
                                 <td style={{ padding:'4px 8px', textAlign:'center' }}>
                                   {(() => {
-                                    const autoEnd = (startIsAuto && row.days && depStart) ? addWorkDays(depStart, row.days - 1) : null;
-                                    const dispEnd = autoEnd || row.end;
+                                    const autoEnd = (row.days && baseStart) ? addWorkDays(baseStart, row.days - 1) : null;
+                                    const dispEnd = (row.end != null && row.end !== '') ? row.end : autoEnd;
                                     if (canEdit) return (
                                       <div style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
                                         <input type="date" defaultValue={dispEnd??''} key={row.id+'_end_'+(dispEnd??'')}
