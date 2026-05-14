@@ -6731,8 +6731,10 @@
     function fmtDate(d) { return d ? d.toISOString().split('T')[0] : ''; }
 
     // CUBES Implementation plan generator (all durations = working days)
-    // overlapBaUiux: 0 = sequential (BA→UI/UX FS), 1-90 = % of BA done when UI/UX starts
-    // overlapBeFe:   0 = sequential (BE→FE FS),    1-90 = % of BE done when FE starts
+    // overlapBaUiux: 0 = sequential (BA→UI/UX FS). When >0: parallel overlap = up to that % of UI/UX
+    //   duration sliding earlier vs strict handoff (UI/UX starts after baD - floor(uxD*overlap/100) work days of BA).
+    // overlapBeFe:   0 = sequential (BE→FE FS). When >0: same idea — FE starts after
+    //   beD - floor(feD*overlap/100) work days of BE (high overlap ⇒ FE starts soon after BE starts).
     function generateCubesPlan(startDateStr, disciplines, overlapBaUiux, overlapBeFe) {
       const tasks = [];
       if (!startDateStr) return tasks;
@@ -6761,7 +6763,8 @@
       // BA → UI/UX dependency: sequential (FS) or overlap at X% of BA
       let uxStart;
       if (overlapBaUiux > 0 && baD > 0 && uxD > 0) {
-        uxStart = addWorkDays(baStart, Math.floor(baD * overlapBaUiux / 100));
+        const uxLag = Math.max(0, baD - Math.floor(uxD * overlapBaUiux / 100));
+        uxStart = addWorkDays(baStart, uxLag);
       } else if (baD > 0) {
         uxStart = addWorkDays(baEnd, 1);   // FS: UI/UX starts after BA done
       } else {
@@ -6786,7 +6789,8 @@
       // BE → FE dependency: sequential (FS) or overlap at X% of BE
       let feStart;
       if (overlapBeFe > 0 && beD > 0 && feD > 0) {
-        feStart = addWorkDays(beStart, Math.floor(beD * overlapBeFe / 100));
+        const feLag = Math.max(0, beD - Math.floor(feD * overlapBeFe / 100));
+        feStart = addWorkDays(beStart, feLag);
       } else if (beD > 0) {
         feStart = addWorkDays(beEnd, 1);   // FS: FE starts after BE done
       } else {
@@ -7055,6 +7059,9 @@
       }
       function restoreReviewTask(title) {
         setReviewExcludedTitles(prev => { const n = new Set(prev); n.delete(title); return n; });
+      }
+      function restoreAllReviewExcluded() {
+        setReviewExcludedTitles(() => new Set());
       }
       function cleanWizardPredecessor(pred) {
         if (!pred) return null;
@@ -7488,22 +7495,29 @@
                           onChange={() => setOverlapBaUiux(0)} />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Sequential — UI/UX starts after BA is done (FS)</span>
                       </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer', flexWrap: 'wrap' }}>
                         <input type="radio" name="baUiux" checked={overlapBaUiux > 0}
                           disabled={disabled}
                           onChange={() => setOverlapBaUiux(40)} />
-                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Parallel — UI/UX starts when BA is</span>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Parallel — overlap up to</span>
                         <input type="number" min="10" max="90" step="5"
                           style={{ width: 52, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', fontSize: 12 }}
                           value={overlapBaUiux > 0 ? overlapBaUiux : 40}
                           onChange={e => setOverlapBaUiux(Math.min(90, Math.max(10, Number(e.target.value))))}
                           onClick={() => overlapBaUiux === 0 && setOverlapBaUiux(40)}
                         />
-                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>% done</span>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>% of UI/UX duration (earlier start vs strict BA done)</span>
                       </label>
-                      {overlapBaUiux > 0 && !disabled && (
-                        <div className="overlap-save">Saves ~{Math.floor((disciplines.UIUX?.days || 0) * overlapBaUiux / 100)} working days</div>
-                      )}
+                      {overlapBaUiux > 0 && !disabled && (() => {
+                        const baD = disciplines.BA?.days || 0, uxD = disciplines.UIUX?.days || 0;
+                        const lag = Math.max(0, baD - Math.floor(uxD * overlapBaUiux / 100));
+                        return (
+                          <>
+                            <div className="overlap-save">Saves ~{Math.floor(uxD * overlapBaUiux / 100)} working days vs strict handoff</div>
+                            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>UI/UX starts after <strong>{lag}</strong> working {lag === 1 ? 'day' : 'days'} of BA.</div>
+                          </>
+                        );
+                      })()}
                     </div>
                     ); })()}
 
@@ -7522,22 +7536,29 @@
                           onChange={() => setOverlapBeFe(0)} />
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Sequential — FE starts after BE is done (FS)</span>
                       </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'not-allowed' : 'pointer', flexWrap: 'wrap' }}>
                         <input type="radio" name="beFe" checked={overlapBeFe > 0}
                           disabled={disabled}
                           onChange={() => setOverlapBeFe(40)} />
-                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Parallel — FE starts when BE is</span>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Parallel — overlap up to</span>
                         <input type="number" min="10" max="90" step="5"
                           style={{ width: 52, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', fontSize: 12 }}
                           value={overlapBeFe > 0 ? overlapBeFe : 40}
                           onChange={e => setOverlapBeFe(Math.min(90, Math.max(10, Number(e.target.value))))}
                           onClick={() => overlapBeFe === 0 && setOverlapBeFe(40)}
                         />
-                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>% done</span>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>% of FE duration (earlier start vs strict BE done)</span>
                       </label>
-                      {overlapBeFe > 0 && !disabled && (
-                        <div className="overlap-save">Saves ~{Math.floor((disciplines.FE?.days || 0) * overlapBeFe / 100)} working days</div>
-                      )}
+                      {overlapBeFe > 0 && !disabled && (() => {
+                        const beD = disciplines.BE?.days || 0, feD = disciplines.FE?.days || 0;
+                        const lag = Math.max(0, beD - Math.floor(feD * overlapBeFe / 100));
+                        return (
+                          <>
+                            <div className="overlap-save">Saves ~{Math.floor(feD * overlapBeFe / 100)} working days vs strict handoff</div>
+                            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>FE starts after <strong>{lag}</strong> working {lag === 1 ? 'day' : 'days'} of BE (both in flight).</div>
+                          </>
+                        );
+                      })()}
                     </div>
                     ); })()}
 
@@ -7582,13 +7603,22 @@
 
                   {reviewExcludedTitles.size > 0 && (
                     <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(251,191,36,.45)', background: 'rgba(251,191,36,.08)', fontSize: 11 }}>
-                      <strong style={{ color: 'var(--a)' }}>Hidden from export</strong> — these rows will not be created; Effort &amp; Team values are unchanged. Restore:{' '}
-                      {[...reviewExcludedTitles].map(title => (
-                        <button key={title} type="button" onClick={() => restoreReviewTask(title)}
-                          style={{ margin: '0 4px 4px 0', fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', cursor: 'pointer' }}>
-                          {title} ↩
+                      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+                        <strong style={{ color: 'var(--a)' }}>Hidden from export</strong>
+                        <span style={{ color: 'var(--muted)' }}>— restore one task or all (redo delete):</span>
+                        <button type="button" onClick={restoreAllReviewExcluded}
+                          style={{ fontSize: 10, padding: '2px 10px', borderRadius: 4, border: '1px solid var(--brand)', background: 'rgba(99,102,241,.12)', color: 'var(--brand)', cursor: 'pointer', fontWeight: 700 }}>
+                          Restore all
                         </button>
-                      ))}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {[...reviewExcludedTitles].map(title => (
+                          <button key={title} type="button" onClick={() => restoreReviewTask(title)}
+                            style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', cursor: 'pointer' }}>
+                            {title} ↩
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -7647,7 +7677,7 @@
                                   </td>
                                   <td style={{ textAlign: 'center' }}>
                                     {!isPhase && !isMs ? (
-                                      <button type="button" title="Hide row from created projects (does not reset Effort &amp; Team). Restore from banner above."
+                                      <button type="button" title="Hide row from export. Click Restore all or ↩ on the banner to undo."
                                         onClick={() => excludeReviewTask(t)}
                                         style={{ padding: '1px 5px', fontSize: 10, borderRadius: 3, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
                                     ) : null}
