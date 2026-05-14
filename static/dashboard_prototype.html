@@ -7016,6 +7016,8 @@
         if (!startDate) return [];
         return generateCubesPlan(startDate, schedulingDisciplines, overlapBaUiux, overlapBeFe);
       }, [startDate, schedulingDisciplines, overlapBaUiux, overlapBeFe]);
+      const cubesPlanGenRef = React.useRef([]);
+      cubesPlanGenRef.current = generatedTasks;
 
       const generatedTasksImpl = React.useMemo(() => {
         if (!startDate) return [];
@@ -7032,30 +7034,42 @@
         setDiscs(d => ({ ...d, [role]: { ...d[role], resources: Math.max(1, (d[role].resources || 1) + delta) } }));
       }
 
-      const projEnd = generatedTasks.length ? generatedTasks[generatedTasks.length - 1].end : startDate;
-      const implEnd = generatedTasksImpl.length ? generatedTasksImpl[generatedTasksImpl.length - 1].end : startDate;
-
-      function removeWizardTask(t) {
-        if (!t || t.is_summary || t.is_milestone) return;
-        if (t.title === 'Business Analysis (BA)') { setDays('BA', 0); return; }
-        if (t.title === 'UI/UX Design') { setDays('UIUX', 0); return; }
-        if (t.title.includes('Backend Development')) { setDays('BE', 0); return; }
-        if (t.title.includes('Frontend Development')) { setDays('FE', 0); return; }
-        if (t.title === 'QC Preparation') { setQcField('prepDays', 0); return; }
-        if (t.title.includes('QC Execution Cycle 1')) { setQcField('cyc1Days', 0); return; }
-        if (t.title.includes('QC Execution Cycle 2')) { setQcField('cyc2Days', 0); return; }
-        if (t.title.includes('Defect Fixing (Cycle 1)')) { setQcField('df1Days', 0); return; }
-        if (t.title.includes('Defect Fixing (Cycle 2)')) { setQcField('df2Days', 0); return; }
-        if (t.title.includes('Regression')) { setQcField('regDays', 0); return; }
-        if (t.title.includes('Production Release')) { setQcField('prDays', 0); return; }
-      }
-
       // Per-task date overrides for the Review step (applied on top of generated schedule)
       const [dateOverrides, setDateOverrides] = useState({});
       function setTaskDateOverride(title, field, value) {
         setDateOverrides(prev => ({ ...prev, [title]: { ...(prev[title] || {}), [field]: value } }));
       }
       function clearDateOverrides() { setDateOverrides({}); }
+
+      // Soft-exclude tasks from Review/Final/Create without zeroing Effort & Team (disciplines stay intact)
+      const [reviewExcludedTitles, setReviewExcludedTitles] = useState(() => new Set());
+      function excludeReviewTask(t) {
+        if (!t || t.is_summary || t.is_milestone) return;
+        setReviewExcludedTitles(prev => new Set(prev).add(t.title));
+        setDateOverrides(prev => {
+          if (!prev[t.title]) return prev;
+          const next = { ...prev };
+          delete next[t.title];
+          return next;
+        });
+      }
+      function restoreReviewTask(title) {
+        setReviewExcludedTitles(prev => { const n = new Set(prev); n.delete(title); return n; });
+      }
+      function cleanWizardPredecessor(pred) {
+        if (!pred) return null;
+        for (const ex of reviewExcludedTitles) {
+          if (pred.includes(ex)) return null;
+        }
+        return pred;
+      }
+
+      function countWorkDays(from, to) {
+        if (!from || !to) return 0;
+        let d = new Date(from), cnt = 0, end = new Date(to);
+        while (d <= end) { if (isWorkingDay(d)) cnt++; d.setDate(d.getDate() + 1); }
+        return cnt;
+      }
 
       // reviewTasks: generatedTasks with dateOverrides applied for display
       const reviewTasks = React.useMemo(() => {
@@ -7066,25 +7080,58 @@
         });
       }, [generatedTasks, dateOverrides]);
 
+      const reviewTasksVisible = React.useMemo(
+        () => reviewTasks.filter(t => !reviewExcludedTitles.has(t.title)),
+        [reviewTasks, reviewExcludedTitles]
+      );
+
+      const implEnd = generatedTasksImpl.length ? generatedTasksImpl[generatedTasksImpl.length - 1].end : startDate;
+      const totalDaysImpl = countWorkDays(startDate, implEnd);
+
+      const { projEnd, totalDays } = React.useMemo(() => {
+        const leaves = reviewTasksVisible.filter(t => !t.is_summary && !t.is_milestone && t.end);
+        if (!leaves.length) return { projEnd: startDate, totalDays: 0 };
+        const end = leaves.reduce((best, t) => (!best || t.end > best ? t.end : best), null);
+        return { projEnd: end || startDate, totalDays: end ? countWorkDays(startDate, end) : 0 };
+      }, [reviewTasksVisible, startDate]);
+
       function isValidDate(d) { const yr = parseInt((d||'').split('-')[0],10); return yr>=2020 && yr<=2035; }
       function onReviewEndChange(t, newEnd) {
         if (!newEnd || !isValidDate(newEnd)) return;
         const s = (dateOverrides[t.title]?.start) || t.start;
         if (!s) return;
         const newDur = Math.max(1, countWorkDays(s, newEnd));
-        // Back-propagate duration → schedule regenerates
         applyDurationChange(t, newDur);
+        setTaskDateOverride(t.title, 'start', s);
         setTaskDateOverride(t.title, 'end', newEnd);
       }
       function onReviewStartChange(t, newStart) {
         if (!newStart || !isValidDate(newStart)) return;
-        // Keep original duration, compute new end = newStart + (originalDays - 1) work days
-        const originalDays = t.duration_days || 1;
-        const newEnd = fmtDateStr(addWorkDaysStr(newStart, originalDays - 1));
+        const originalDays = Math.max(0.5, Number(t.duration_days) || 1);
+        const newEnd = fmtDateStr(addWorkDaysStr(newStart, Math.max(0, originalDays - 1)));
         setTaskDateOverride(t.title, 'start', newStart);
         setTaskDateOverride(t.title, 'end', newEnd);
-        // If this is the first leaf task, also shift the overall project start
         if (t.title === 'Business Analysis (BA)') setStartDate(newStart);
+      }
+      function onReviewDaysChange(t, rawVal) {
+        const d = Math.max(0, parseFloat(rawVal) || 0);
+        const title = t.title;
+        applyDurationChange(t, d);
+        setTimeout(() => {
+          const row = cubesPlanGenRef.current.find(x => x.title === title);
+          setDateOverrides(prev => {
+            if (d < 0.5) {
+              if (!prev[title]) return prev;
+              const next = { ...prev };
+              delete next[title];
+              return next;
+            }
+            const effStart = (prev[title]?.start) || row?.start;
+            if (!effStart) return prev;
+            const newEnd = fmtDateStr(addWorkDaysStr(effStart, Math.max(0, d - 1)));
+            return { ...prev, [title]: { ...prev[title], start: effStart, end: newEnd } };
+          });
+        }, 0);
       }
       function addWorkDaysStr(dateStr, n) {
         if (!dateStr || n <= 0) return dateStr;
@@ -7110,23 +7157,15 @@
         else if (t.title.includes('Production Release')) setQcField('prDays', newDays);
       }
 
-      function countWorkDays(from, to) {
-        if (!from || !to) return 0;
-        let d = new Date(from), cnt = 0, end = new Date(to);
-        while (d <= end) { if (isWorkingDay(d)) cnt++; d.setDate(d.getDate() + 1); }
-        return cnt;
-      }
-      const totalDays = countWorkDays(startDate, projEnd);
-      const totalDaysImpl = countWorkDays(startDate, implEnd);
-
       function buildPayload(tasks, nameStr, teamType) {
         const allocations = {};
         Object.entries(disciplines).forEach(([role, v]) => { allocations[role] = v.resources || 1; });
         // Merge generated tasks + any custom rows added by admin
         // Apply dateOverrides as final overrides on the CUBES plan (for impl plan, no overrides)
         const isCubes = teamType === 'cubes';
+        const tasksFiltered = tasks.filter(t => !reviewExcludedTitles.has(t.title));
         const allTasks = [
-          ...tasks.map(t => {
+          ...tasksFiltered.map(t => {
             const ov = (isCubes && dateOverrides[t.title]) || {};
             const finalStart = ov.start || t.start;
             const finalEnd = ov.end || t.end;
@@ -7138,7 +7177,7 @@
               pct: (t.role && (completedPhases.has(t.role) || (t.role === 'ALL' && completedPhases.has('QC')))) ? 100 : 0,
               role: t.role || null,
               resources: t.resources || 1, duration_days: t.duration_days || 0,
-              predecessor: t.predecessor || null,
+              predecessor: isCubes ? cleanWizardPredecessor(t.predecessor) : (t.predecessor || null),
             };
           }),
           ...customTasks.map(ct => ({
@@ -7169,7 +7208,7 @@
           const baseName = name.trim();
           await api.createWizardProject(buildPayload(reviewTasks, baseName + ' [Cubes]', 'cubes'));
           setSaveMsg('Creating Implementation project…');
-          await api.createWizardProject(buildPayload(generatedTasksImpl, baseName + ' [Imp]', 'implementation'));
+          await api.createWizardProject(buildPayload(generatedTasksImpl.filter(t => !reviewExcludedTitles.has(t.title)), baseName + ' [Imp]', 'implementation'));
           onCreated();
           onClose();
         } catch (e) { alert('Error: ' + e.message); }
@@ -7541,6 +7580,18 @@
                     <strong>{name ? name + ' [Cubes]' : '—'}</strong> (CUBES team) and <strong>{name ? name + ' [Imp]' : '—'}</strong> (Implementation team — {implMargin}% buffer). You can edit durations and dependencies below before creating.
                   </div>
 
+                  {reviewExcludedTitles.size > 0 && (
+                    <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(251,191,36,.45)', background: 'rgba(251,191,36,.08)', fontSize: 11 }}>
+                      <strong style={{ color: 'var(--a)' }}>Hidden from export</strong> — these rows will not be created; Effort &amp; Team values are unchanged. Restore:{' '}
+                      {[...reviewExcludedTitles].map(title => (
+                        <button key={title} type="button" onClick={() => restoreReviewTask(title)}
+                          style={{ margin: '0 4px 4px 0', fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', cursor: 'pointer' }}>
+                          {title} ↩
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Side-by-side editable plans */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                     {/* CUBES Plan — editable */}
@@ -7558,7 +7609,7 @@
                         <table>
                           <thead><tr><th>Task</th><th style={{ minWidth: 100 }}>Start</th><th style={{ minWidth: 100 }}>End</th><th style={{ width: 56 }}>Days</th><th style={{ width: 44 }}>Res.</th><th>Predecessor</th><th style={{ width: 32 }} /></tr></thead>
                           <tbody>
-                            {reviewTasks.map((t, i) => {
+                            {reviewTasksVisible.map((t, i) => {
                               const isPhase = t.is_summary;
                               const isMs = t.is_milestone;
                               const isCross = t.predecessor && t.predecessor.includes('cross-phase');
@@ -7585,7 +7636,7 @@
                                     {!isPhase && !isMs ? (
                                       <input type="number" min="0" step="0.5" max="365"
                                         value={t.duration_days ?? ''}
-                                        onChange={e => applyDurationChange(t, Math.max(0, parseFloat(e.target.value) || 0))}
+                                        onChange={e => onReviewDaysChange(t, e.target.value)}
                                         style={{ width: 52, minWidth: 52, padding: '3px 6px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--text)', textAlign: 'center' }}
                                       />
                                     ) : '—'}
@@ -7596,8 +7647,8 @@
                                   </td>
                                   <td style={{ textAlign: 'center' }}>
                                     {!isPhase && !isMs ? (
-                                      <button type="button" title="Remove from plan (0 days)"
-                                        onClick={() => removeWizardTask(t)}
+                                      <button type="button" title="Hide row from created projects (does not reset Effort &amp; Team). Restore from banner above."
+                                        onClick={() => excludeReviewTask(t)}
                                         style={{ padding: '1px 5px', fontSize: 10, borderRadius: 3, border: '1px solid var(--border)', background: 'var(--s2)', color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
                                     ) : null}
                                   </td>
@@ -7723,7 +7774,7 @@
 
                   {/* ── Mini Gantt Timeline Preview ── */}
                   {(() => {
-                    const leafTasks = generatedTasks.filter(t => !t.is_summary && !t.is_milestone && t.start && t.end);
+                    const leafTasks = reviewTasksVisible.filter(t => !t.is_summary && !t.is_milestone && t.start && t.end);
                     if (!leafTasks.length) return null;
                     const allDates = leafTasks.flatMap(t => [new Date(t.start), new Date(t.end)]);
                     const minDate  = new Date(Math.min(...allDates.map(d => d.getTime())));
@@ -7819,7 +7870,7 @@
                         </tr>
                       </thead>
                       <tbody>
-                        {reviewTasks.map((t, i) => {
+                        {reviewTasksVisible.map((t, i) => {
                           const isPhase = t.is_summary;
                           const isMs = t.is_milestone;
                           const hasOv = !!(dateOverrides[t.title]);
