@@ -316,6 +316,12 @@
       border: 1px solid var(--r-bd)
     }
 
+    .rag-C {
+      background: rgba(59, 130, 246, 0.14);
+      color: #2563eb;
+      border: 1px solid rgba(59, 130, 246, 0.45)
+    }
+
     .sb-foot {
       padding: 10px 14px;
       border-top: 1px solid var(--border);
@@ -419,7 +425,7 @@
     /* KPI */
     .kpi-row {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       gap: 10px
     }
 
@@ -458,6 +464,10 @@
 
     .kpi.kr::before {
       background: linear-gradient(90deg, var(--r), #fca5a5)
+    }
+
+    .kpi.kc::before {
+      background: linear-gradient(90deg, #3b82f6, #93c5fd)
     }
 
     .kpi.kx::before {
@@ -2327,6 +2337,7 @@
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
     function rag(pct, end, start) {
+      // NB: pct>=100 does not imply "Completed" (see transformData effectiveHealth parity).
       if (pct >= 100) return 'G';
       if (TODAY > new Date(end) && pct < 100) return 'R';
       // Compare actual progress to time-based expected progress
@@ -2341,7 +2352,7 @@
       }
       return pct >= 50 ? 'G' : pct >= 20 ? 'A' : 'R';
     }
-    const ragLabel = r => r === 'G' ? 'On Track' : r === 'A' ? 'At Risk' : 'Delayed';
+    const ragLabel = r => r === 'C' ? 'Completed' : r === 'G' ? 'On Track' : r === 'A' ? 'At Risk' : 'Delayed';
 
     // PMO-standard task status taxonomy
     function taskSt(t) {
@@ -2482,6 +2493,7 @@
     // Generate a plain-English explanation of the project health RAG.
     function healthReason(p) {
       const todayStr = TODAY.toISOString().split('T')[0];
+      if (p.health === 'C') return 'Project is 100% complete — all tracked work finished.';
       const leaves = p.items.filter(t => !t.is_summary && !t.is_milestone);
       const delayed = leaves.filter(t => { const s = taskSt(t); return s.c === 'sc-critical' || s.c === 'sc-late'; });
       const noStart = leaves.filter(t => taskSt(t).c === 'sc-risk' && t.pct === 0);
@@ -2717,9 +2729,15 @@
 
         // Normalize legacy 'ontrack' value to standard 'G' so healthLabel/healthColor work correctly
         const normalizeH = h => h === 'ontrack' ? 'G' : (['G','A','R','C'].includes(h) ? h : null);
-        // For quick-add projects use the manually-set health from DB; otherwise compute from rag().
         const computedHealth = rag(progress, pEnd || p.end_date, ss[0] || p.start_date);
-        const health = (p.is_quick_add && normalizeH(p.health)) ? normalizeH(p.health) : computedHealth;
+        // Mirror effectiveHealth(...) on the Exec Summary — Status column reads p.health, not effectiveHealth.
+        const leavesForDone = items.filter(t => !t.is_summary && !t.is_milestone && !t.is_project_root);
+        const allLeavesDone = leavesForDone.length === 0 || leavesForDone.every(t => (t.pct || 0) >= 100);
+        let health;
+        if (progress >= 100 && allLeavesDone) health = 'C';
+        else if (progress >= 100 && !allLeavesDone) health = 'A';
+        else if (p.is_quick_add && normalizeH(p.health)) health = normalizeH(p.health);
+        else health = computedHealth;
 
         return {
           code: p.code, name: p.name, mpp_path: p.mpp_path || '',
@@ -4101,6 +4119,7 @@
               <option value="G">On Track</option>
               <option value="A">At Risk</option>
               <option value="R">Delayed</option>
+              <option value="C">Completed</option>
             </select>
           </div>
           <div style={{ padding: '10px 14px 0' }}>
@@ -4190,6 +4209,7 @@
       const g = projects.filter(p => p.health === 'G').length;
       const a = projects.filter(p => p.health === 'A').length;
       const r = projects.filter(p => p.health === 'R').length;
+      const done = projects.filter(p => p.health === 'C').length;
       const dl = n ? Math.round(projects.reduce((s, p) => s + Math.max(0, days(TODAY.toISOString().split('T')[0], p.end)), 0) / n) : 0;
       return (
         <div className="kpi-row">
@@ -4197,6 +4217,7 @@
           <div className="kpi kg"><div className="kl">On Track</div><div className="kv" style={{ color: 'var(--g)' }}>{g}</div><div className="ks">RAG Green</div></div>
           <div className="kpi ka"><div className="kl">At Risk</div><div className="kv" style={{ color: 'var(--a)' }}>{a}</div><div className="ks">RAG Amber</div></div>
           <div className="kpi kr"><div className="kl">Delayed</div><div className="kv" style={{ color: 'var(--r)' }}>{r}</div><div className="ks">RAG Red</div></div>
+          <div className="kpi kc"><div className="kl">Completed</div><div className="kv" style={{ color: '#2563eb' }}>{done}</div><div className="ks">100% delivered</div></div>
           <div className="kpi kx"><div className="kl">Avg Days Left</div><div className="kv" style={{ fontSize: 22 }}>{dl}d</div><div className="ks">to deadline</div></div>
         </div>
       );
@@ -6237,7 +6258,7 @@
                             <span style={{ fontWeight:800, fontSize:12, color:hBg }}>{hc}%</span>
                           </div>
                           <span style={{ fontSize:11, color:'var(--muted)' }}>📅 {fmt(p.start)} → {fmt(p.end)}</span>
-                          <span className={`rag rag-${p.health}`} style={{ fontSize:10 }}>{p.health === 'G' ? 'On Track' : p.health === 'A' ? 'At Risk' : 'Delayed'}</span>
+                          <span className={`rag rag-${p.health}`} style={{ fontSize:10 }}>{ragLabel(p.health)}</span>
                           <span style={{ fontSize:10, color:'var(--muted)', marginLeft:'auto' }}>
                             {taskCount} tasks · {summaryCount} summaries · {msCount} milestones
                           </span>
@@ -6363,8 +6384,8 @@
         return Math.round(elap / totalD * 100);
       }).reduce((a, b) => a + b, 0) / Math.max(1, leaves.length)) || 0;
 
-      const healthBg = h => h === 'G' ? '#dcfce7' : h === 'A' ? '#fef08a' : '#fee2e2';
-      const healthFg = h => h === 'G' ? '#166534' : h === 'A' ? '#854d0e' : '#991b1b';
+      const healthBg = h => h === 'C' ? '#dbeafe' : h === 'G' ? '#dcfce7' : h === 'A' ? '#fef08a' : '#fee2e2';
+      const healthFg = h => h === 'C' ? '#1d4ed8' : h === 'G' ? '#166534' : h === 'A' ? '#854d0e' : '#991b1b';
       const allTaskItems = p.items.filter(t => !t.is_project_root);
 
       const reportHtml = (
@@ -6388,8 +6409,8 @@
                   <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb', fontWeight: 600 }}>{proj.name}</td>
                   <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb' }}>{proj.start ? fmt(proj.start) : '—'}</td>
                   <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb' }}>{proj.end ? fmt(proj.end) : '—'}</td>
-                  <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb', color: proj.health === 'G' ? '#166534' : proj.health === 'A' ? '#854d0e' : '#b91c1c', fontWeight: 700 }}>
-                    {proj.health === 'G' ? 'On Track' : proj.health === 'A' ? 'At Risk' : 'Delayed'}
+                  <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb', color: proj.health === 'C' ? '#1d4ed8' : proj.health === 'G' ? '#166534' : proj.health === 'A' ? '#854d0e' : '#b91c1c', fontWeight: 700 }}>
+                    {proj.health === 'C' ? 'Completed' : proj.health === 'G' ? 'On Track' : proj.health === 'A' ? 'At Risk' : 'Delayed'}
                   </td>
                   <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb', fontWeight: 700 }}>{proj.progress}%</td>
                   <td style={{ padding: '9px 10px', border: '1px solid #e5e7eb' }}>
@@ -8242,8 +8263,8 @@
       const [addForm, setAddForm] = useState(null);
       const [saving, setSaving] = useState(false);
       const isAdmin = user?.role === 'admin';
-      const ragLabel = h => h === 'G' ? 'On Track' : h === 'A' ? 'At Risk' : 'Delayed';
-      const ragColor = h => h === 'G' ? '#22c55e' : h === 'A' ? '#f97316' : '#ef4444';
+      const ragLabel = h => h === 'C' ? 'Completed' : h === 'G' ? 'On Track' : h === 'A' ? 'At Risk' : 'Delayed';
+      const ragColor = h => h === 'C' ? '#3b82f6' : h === 'G' ? '#22c55e' : h === 'A' ? '#f97316' : '#ef4444';
       const STAGE_OPTIONS = ['New','In BA','Ready For Dev','Under Development','In QC','Released','On Hold','Cancelled'];
 
       async function reload() {

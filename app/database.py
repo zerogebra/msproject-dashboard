@@ -514,6 +514,109 @@ def _seed_vc_scope(conn) -> None:
         pass
 
 
+def _inject_ai_bot_fe_subtasks(conn: sqlite3.Connection) -> None:
+    """Add FE milestone subtasks under Frontend Development (FE) for AI-BOT wizard projects.
+
+    Marks FE as a summary row with level-4 children so the dashboard rolls up weighted
+    % complete from M1–M10. Reorders tasks (rowid order) so WBS nesting stays valid. Idempotent.
+    """
+    fe_title = "Frontend Development (FE)"
+    marker = "M1 — Configuration & Environment Setup"
+    subs = [
+        (marker, "2026-05-04T08:00", "2026-05-17T17:00", 8, 100.0),
+        ("M2 — Data Ingestion Pipeline", "2026-05-17T08:00", "2026-05-21T17:00", 5, 50.0),
+        ("M3 — LLM Initialization", "2026-05-24T08:00", "2026-05-24T17:00", 1, 0.0),
+        ("M4 — Prompt Engineering", "2026-05-31T08:00", "2026-06-03T17:00", 4, 0.0),
+        ("M5 — Schema & State Definitions", "2026-06-03T08:00", "2026-06-04T17:00", 2, 0.0),
+        ("M6 — Tools Layer", "2026-06-07T08:00", "2026-06-08T17:00", 2, 0.0),
+        ("M7 — Graph Nodes", "2026-06-09T08:00", "2026-06-10T17:00", 2, 0.0),
+        ("M8 — Graph Architecture", "2026-06-11T08:00", "2026-06-11T17:00", 1, 0.0),
+        ("M9 — Streaming Service", "2026-06-14T08:00", "2026-06-14T17:00", 1, 0.0),
+        ("M10 — API & Frontend + E2E", "2026-06-15T08:00", "2026-06-18T17:00", 4, 0.0),
+    ]
+
+    for row in conn.execute("SELECT code FROM projects WHERE name LIKE 'AI-BOT%'").fetchall():
+        code = row["code"]
+        if conn.execute(
+            "SELECT 1 FROM tasks WHERE project_code=? AND title=?",
+            (code, marker),
+        ).fetchone():
+            continue
+        old_rows = list(conn.execute("SELECT * FROM tasks WHERE project_code=? ORDER BY rowid", (code,)))
+        if not old_rows:
+            continue
+        fe_i = next((i for i, r in enumerate(old_rows) if r["title"] == fe_title), None)
+        if fe_i is None:
+            continue
+
+        rebuilt = []
+        for i, r in enumerate(old_rows):
+            rd = dict(r)
+            if i == fe_i:
+                rd["is_summary"] = 1
+                rebuilt.append(rd)
+                crit = rd.get("is_critical", 0)
+                for title, sdt, edt, dur, pct in subs:
+                    rebuilt.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "project_code": code,
+                            "title": title,
+                            "start_date": sdt,
+                            "end_date": edt,
+                            "pct": pct,
+                            "outline_level": 4,
+                            "is_summary": 0,
+                            "is_milestone": 0,
+                            "is_critical": crit,
+                            "forecast_end_date": None,
+                            "comments": None,
+                            "extended_days": 0,
+                            "actual_start_date": None,
+                            "actual_finish_date": None,
+                            "predecessor_id": None,
+                            "duration_days": dur,
+                            "predecessor_type": "FS",
+                            "predecessor_lag": 0,
+                        }
+                    )
+            else:
+                rebuilt.append(rd)
+
+        conn.execute("DELETE FROM tasks WHERE project_code=?", (code,))
+        ins = (
+            "INSERT INTO tasks (id, project_code, title, start_date, end_date, pct, outline_level, "
+            "is_summary, is_milestone, is_critical, forecast_end_date, comments, extended_days, "
+            "actual_start_date, actual_finish_date, predecessor_id, duration_days, predecessor_type, predecessor_lag) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        )
+        for d in rebuilt:
+            conn.execute(
+                ins,
+                (
+                    d["id"],
+                    d["project_code"],
+                    d["title"],
+                    d["start_date"],
+                    d["end_date"],
+                    d["pct"],
+                    d["outline_level"],
+                    d["is_summary"],
+                    d["is_milestone"],
+                    d.get("is_critical", 0),
+                    d.get("forecast_end_date"),
+                    d.get("comments"),
+                    d.get("extended_days", 0),
+                    d.get("actual_start_date"),
+                    d.get("actual_finish_date"),
+                    d.get("predecessor_id"),
+                    d.get("duration_days", 0),
+                    d.get("predecessor_type", "FS"),
+                    d.get("predecessor_lag", 0),
+                ),
+            )
+
+
 # ── init & migration ─────────────────────────────────────────────
 
 def init_db() -> None:
@@ -956,6 +1059,11 @@ def init_db() -> None:
                 "INSERT OR IGNORE INTO resources (id, name, role, title, active) VALUES (?,?,?,?,?)",
                 default_resources
             )
+
+        try:
+            _inject_ai_bot_fe_subtasks(conn)
+        except Exception:
+            pass
 
         # Ensure at least one admin exists (check for admin specifically, not just any user)
         admin_count = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
