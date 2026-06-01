@@ -10818,7 +10818,7 @@
         if (codeMap && changedField !== 'start') {
           const depStart = resolveDepStart(row, codeMap);
           if (depStart) {
-            if (changedField === 'cascade' || !row.start) {
+            if (changedField === 'cascade' || !row.start || depStart > row.start) {
               row.start = depStart;
             }
             if (!isEstStage && row.days != null && row.days > 0 && row.start) {
@@ -11184,7 +11184,9 @@
                             const codeMapNow = buildCodeMap(plan);
                             const depStart = resolveDepStart(row, codeMapNow);
                             const startIsAuto = !!(row.depends_on && row.depends_on.length && depStart);
-                            const baseStart = row.start || (startIsAuto ? depStart : null);
+                            const baseStart = startIsAuto && depStart && (!row.start || depStart > row.start)
+                              ? depStart
+                              : (row.start || null);
                             const endAuto = row.days != null && !!baseStart;
                             const deps = row.depends_on || [];
                             const allCodes = Object.keys(codeMapNow).filter(c => c !== code);
