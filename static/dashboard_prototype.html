@@ -10789,7 +10789,7 @@
         let latest = null;
         for (const dep of deps) {
           const ref = codeMap[dep.ref];
-          if (!ref) continue;
+          if (!ref || ref === row) continue; // skip missing refs and self-references
           let calcStart = null;
           if (dep.type === 'SS') {
             calcStart = ref.start ? addWorkDays(ref.start, dep.lag || 0) : null;
@@ -11282,6 +11282,7 @@
                                       function addDep(ref) {
                                         const trimmed = ref.trim();
                                         if (!trimmed) return;
+                                        if (trimmed === code) return; // block self-reference
                                         updatePhase(pi, phi, n => {
                                           const r = getRow(n);
                                           if (!r.depends_on) r.depends_on = [];
